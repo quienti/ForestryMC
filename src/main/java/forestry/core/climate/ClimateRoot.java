@@ -10,24 +10,23 @@
  ******************************************************************************/
 package forestry.core.climate;
 
+import javax.annotation.Nullable;
+
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 import net.minecraft.world.biome.Biome;
-import net.minecraft.world.server.ServerWorld;
-import net.minecraft.world.storage.DimensionSavedDataManager;
-
-import net.minecraftforge.common.util.LazyOptional;
+import net.minecraft.world.storage.MapStorage;
 
 import forestry.api.climate.ClimateCapabilities;
 import forestry.api.climate.IClimateListener;
+import forestry.api.climate.IClimateManager;
 import forestry.api.climate.IClimateProvider;
-import forestry.api.climate.IClimateRoot;
 import forestry.api.climate.IClimateState;
 import forestry.api.climate.IWorldClimateHolder;
 import forestry.core.DefaultClimateProvider;
 
-public class ClimateRoot implements IClimateRoot {
+public class ClimateRoot implements IClimateManager {
 
 	private static final ClimateRoot INSTANCE = new ClimateRoot();
 
@@ -35,13 +34,14 @@ public class ClimateRoot implements IClimateRoot {
 		return INSTANCE;
 	}
 
+	@Nullable
 	@Override
-	public LazyOptional<IClimateListener> getListener(World world, BlockPos pos) {
+	public IClimateListener getListener(World world, BlockPos pos) {
 		TileEntity tileEntity = world.getTileEntity(pos);
-		if (tileEntity != null && ClimateCapabilities.CLIMATE_LISTENER != null) {
+		if (tileEntity != null && ClimateCapabilities.CLIMATE_LISTENER != null && tileEntity.hasCapability(ClimateCapabilities.CLIMATE_LISTENER, null)) {
 			return tileEntity.getCapability(ClimateCapabilities.CLIMATE_LISTENER, null);
 		}
-		return LazyOptional.empty();
+		return null;
 	}
 
 	@Override
@@ -57,14 +57,18 @@ public class ClimateRoot implements IClimateRoot {
 
 	public IClimateState getBiomeState(World worldObj, BlockPos coordinates) {
 		Biome biome = worldObj.getBiome(coordinates);
-		return ClimateStateHelper.of(biome.getTemperature(coordinates), biome.getDownfall());
+		return ClimateStateHelper.of(biome.getTemperature(coordinates), biome.getRainfall());
 	}
 
 	@Override
 	public IWorldClimateHolder getWorldClimate(World world) {
-		//TODO - need to make sure this is only called server side...
-		DimensionSavedDataManager storage = ((ServerWorld) world).getSavedData();
-		WorldClimateHolder holder = storage.getOrCreate(() -> new WorldClimateHolder(WorldClimateHolder.NAME), WorldClimateHolder.NAME);
+		MapStorage storage = world.getPerWorldStorage();
+		WorldClimateHolder holder = (WorldClimateHolder) storage.getOrLoadData(WorldClimateHolder.class, WorldClimateHolder.NAME);
+		if (holder == null) {
+			holder = new WorldClimateHolder(WorldClimateHolder.NAME);
+
+			storage.setData(WorldClimateHolder.NAME, holder);
+		}
 		holder.setWorld(world);
 		return holder;
 	}
