@@ -10,6 +10,9 @@
  ******************************************************************************/
 package forestry.farming.logic;
 
+import com.google.common.collect.HashBasedTable;
+import com.google.common.collect.Table;
+
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -19,7 +22,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.Stack;
 
-import net.minecraft.block.BlockState;
+import net.minecraft.block.state.IBlockState;
+import net.minecraft.init.Blocks;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.NonNullList;
 import net.minecraft.util.math.BlockPos;
@@ -49,15 +53,50 @@ public class FarmLogicArboreal extends FarmLogicHomogeneous {
 	}
 
 	@Override
-	public NonNullList<ItemStack> collect(World world, IFarmHousing farmHousing) {
-		return collectEntityItems(world, farmHousing, true);
+	public String getUnlocalizedName() {
+		return "for.farm.arboretum";
 	}
 
 	@Override
-	public Collection<ICrop> harvest(World world, IFarmHousing farmHousing, FarmDirection direction, int extent, BlockPos pos) {
-		BlockPos position = farmHousing.getValidPosition(direction, pos, extent, pos.up());
+	public ItemStack getIconItemStack() {
+		return new ItemStack(Blocks.SAPLING);
+	}
+
+	@Override
+	public int getFertilizerConsumption() {
+		return 10;
+	}
+
+	@Override
+	public int getWaterConsumption(float hydrationModifier) {
+		return (int) (10 * hydrationModifier);
+	}
+
+	@Override
+	public NonNullList<ItemStack> collect(World world, IFarmHousing farmHousing) {
+		NonNullList<ItemStack> products = produce;
+		produce = collectEntityItems(world, farmHousing, true);
+		return products;
+	}
+
+	private final Table<BlockPos, BlockPos, Integer> lastExtentsHarvest = HashBasedTable.create();
+
+	@Override
+	public Collection<ICrop> harvest(World world, IFarmHousing farmHousing, BlockPos pos, FarmDirection direction, int extent) {
+		BlockPos farmPos = farmHousing.getCoords();
+		if (!lastExtentsHarvest.contains(farmPos, pos)) {
+			lastExtentsHarvest.put(farmPos, pos, 0);
+		}
+
+		int lastExtent = lastExtentsHarvest.get(farmPos, pos);
+		if (lastExtent > extent) {
+			lastExtent = 0;
+		}
+
+		BlockPos position = translateWithOffset(pos.up(), direction, lastExtent);
 		Collection<ICrop> crops = harvestBlocks(world, position);
-		farmHousing.increaseExtent(direction, pos, extent);
+		lastExtent++;
+		lastExtentsHarvest.put(farmPos, pos, lastExtent);
 
 		return crops;
 	}
@@ -78,16 +117,15 @@ public class FarmLogicArboreal extends FarmLogicHomogeneous {
 
 		while (!knownCropPositions.empty()) {
 			BlockPos knownCropPos = knownCropPositions.pop();
-			for (BlockPos mutable : BlockPos.getAllInBoxMutable(knownCropPos.add(-1, -1, -1), knownCropPos.add(1, 1, 1))) {
-				if (!world.isBlockLoaded(mutable)) {
+			for (BlockPos candidate : BlockPos.getAllInBox(knownCropPos.add(-1, -1, -1), knownCropPos.add(1, 1, 1))) {
+				if (!world.isBlockLoaded(candidate)) {
 					return crops;
 				}
 
-				BlockPos candidate = mutable.toImmutable();
 				if (!checkedBlocks.contains(candidate)) {
 					checkedBlocks.add(candidate);
 
-					BlockState blockState = world.getBlockState(candidate);
+					IBlockState blockState = world.getBlockState(candidate);
 					ICrop crop = farmable.getCropAt(world, candidate, blockState);
 					if (crop != null) {
 						crops.push(crop);
@@ -105,7 +143,7 @@ public class FarmLogicArboreal extends FarmLogicHomogeneous {
 		if (world.isAirBlock(position)) {
 			return null;
 		}
-		BlockState blockState = world.getBlockState(position);
+		IBlockState blockState = world.getBlockState(position);
 		for (IFarmable farmable : farmables) {
 			ICrop crop = farmable.getCropAt(world, position, blockState);
 			if (crop != null) {
@@ -116,13 +154,13 @@ public class FarmLogicArboreal extends FarmLogicHomogeneous {
 	}
 
 	@Override
-	protected boolean maintainSeedlings(World world, IFarmHousing farmHousing, BlockPos pos, FarmDirection direction, int extent) {
+	protected boolean maintainGermlings(World world, IFarmHousing farmHousing, BlockPos pos, FarmDirection direction, int extent) {
 		for (int i = 0; i < extent; i++) {
 			BlockPos position = translateWithOffset(pos, direction, i);
 
 			if (world.isAirBlock(position)) {
 				BlockPos soilPosition = position.down();
-				BlockState soilState = world.getBlockState(soilPosition);
+				IBlockState soilState = world.getBlockState(soilPosition);
 				if (isAcceptedSoil(soilState)) {
 					return plantSapling(world, farmHousing, position, direction);
 				}

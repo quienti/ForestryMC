@@ -10,12 +10,17 @@
  ******************************************************************************/
 package forestry.farming.logic;
 
+import com.google.common.collect.HashBasedTable;
+import com.google.common.collect.Table;
+
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Stack;
 
 import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
+import net.minecraft.block.state.IBlockState;
+import net.minecraft.item.ItemStack;
+import net.minecraft.util.NonNullList;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 
@@ -23,9 +28,12 @@ import forestry.api.farming.FarmDirection;
 import forestry.api.farming.ICrop;
 import forestry.api.farming.IFarmHousing;
 import forestry.api.farming.IFarmProperties;
+import forestry.core.utils.ItemStackUtil;
+import forestry.core.utils.Log;
+import forestry.core.utils.ModUtil;
 import forestry.farming.logic.crops.CropRubber;
-//import forestry.plugins.PluginIC2;
-//import forestry.plugins.PluginTechReborn;
+import forestry.plugins.PluginIC2;
+import forestry.plugins.PluginTechReborn;
 
 public class FarmLogicRubber extends FarmLogic {
 
@@ -33,22 +41,84 @@ public class FarmLogicRubber extends FarmLogic {
 
 	public FarmLogicRubber(IFarmProperties properties, boolean isManual) {
 		super(properties, isManual);
-		//		if ((PluginIC2.rubberWood == null || PluginIC2.resin == null) &&
-		//			PluginTechReborn.rubberItemsSuccess()) {
-		//			Log.warning("Failed to init a farm logic {} since IC2 rubber wood or resin were not found", getClass().getName());
-		//			active = false;
-		//		}
+		if ((PluginIC2.rubberWood == null || PluginIC2.resin == null) &&
+			PluginTechReborn.rubberItemsSuccess()) {
+			Log.warning("Failed to init a farm logic {} since IC2 rubber wood or resin were not found", getClass().getName());
+			active = false;
+		}
 	}
 
 	@Override
-	public Collection<ICrop> harvest(World world, IFarmHousing farmHousing, FarmDirection direction, int extent, BlockPos pos) {
+	public ItemStack getIconItemStack() {
+		if (ModUtil.isModLoaded(PluginIC2.MOD_ID)) {
+			return PluginIC2.resin;
+		} else if (ModUtil.isModLoaded(PluginTechReborn.MOD_ID)) {
+			return PluginTechReborn.sap;
+		}
+		return ItemStack.EMPTY;
+	}
+
+	@Override
+	public String getUnlocalizedName() {
+		return "for.farm.rubber";
+	}
+
+	@Override
+	public int getFertilizerConsumption() {
+		return 40;
+	}
+
+	@Override
+	public int getWaterConsumption(float hydrationModifier) {
+		return (int) (5 * hydrationModifier);
+	}
+
+	@Override
+	public boolean isAcceptedResource(ItemStack itemstack) {
+		return false;
+	}
+
+	@Override
+	public boolean isAcceptedGermling(ItemStack itemstack) {
+		return false;
+	}
+
+	@Override
+	public boolean isAcceptedWindfall(ItemStack stack) {
+		return false;
+	}
+
+	@Override
+	public NonNullList<ItemStack> collect(World world, IFarmHousing farmHousing) {
+		return NonNullList.create();
+	}
+
+	@Override
+	public boolean cultivate(World world, IFarmHousing farmHousing, BlockPos pos, FarmDirection direction, int extent) {
+		return false;
+	}
+
+	private final Table<BlockPos, BlockPos, Integer> lastExtentsHarvest = HashBasedTable.create();
+
+	@Override
+	public Collection<ICrop> harvest(World world, IFarmHousing farmHousing, BlockPos pos, FarmDirection direction, int extent) {
 		if (!active) {
 			return Collections.emptyList();
 		}
+		BlockPos farmPos = farmHousing.getCoords();
+		if (!lastExtentsHarvest.contains(farmPos, pos)) {
+			lastExtentsHarvest.put(farmPos, pos, 0);
+		}
 
-		BlockPos position = farmHousing.getValidPosition(direction, pos, extent, pos.up());
+		int lastExtent = lastExtentsHarvest.get(farmPos, pos);
+		if (lastExtent > extent) {
+			lastExtent = 0;
+		}
+
+		BlockPos position = translateWithOffset(pos.up(), direction, lastExtent);
 		Collection<ICrop> crops = getHarvestBlocks(world, position);
-		farmHousing.increaseExtent(direction, pos, extent);
+		lastExtent++;
+		lastExtentsHarvest.put(farmPos, pos, lastExtent);
 
 		return crops;
 	}
@@ -63,12 +133,12 @@ public class FarmLogicRubber extends FarmLogic {
 				return crops;
 			}
 
-			BlockState blockState = world.getBlockState(candidate);
+			IBlockState blockState = world.getBlockState(candidate);
 			Block block = blockState.getBlock();
-			//			if ((PluginIC2.rubberWood != null && !ItemStackUtil.equals(block, PluginIC2.rubberWood)) &&
-			//				(PluginTechReborn.RUBBER_WOOD != null && !ItemStackUtil.equals(block, PluginTechReborn.RUBBER_WOOD))) {
-			//				break;
-			//			}
+			if ((PluginIC2.rubberWood != null && !ItemStackUtil.equals(block, PluginIC2.rubberWood)) &&
+				(PluginTechReborn.RUBBER_WOOD != null && !ItemStackUtil.equals(block, PluginTechReborn.RUBBER_WOOD))) {
+				break;
+			}
 
 			if (CropRubber.hasRubberToHarvest(blockState)) {
 				crops.push(new CropRubber(world, blockState, candidate));

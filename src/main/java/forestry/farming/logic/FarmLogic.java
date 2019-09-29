@@ -18,14 +18,14 @@ import java.util.List;
 import java.util.Stack;
 
 import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.entity.item.ItemEntity;
+import net.minecraft.block.state.IBlockState;
+import net.minecraft.entity.item.EntityItem;
+import net.minecraft.init.Blocks;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.NonNullList;
 import net.minecraft.util.math.AxisAlignedBB;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.vector.Vector3i;
+import net.minecraft.util.math.Vec3i;
 import net.minecraft.world.World;
 
 import forestry.api.farming.FarmDirection;
@@ -34,26 +34,37 @@ import forestry.api.farming.IFarmHousing;
 import forestry.api.farming.IFarmLogic;
 import forestry.api.farming.IFarmProperties;
 import forestry.api.farming.IFarmable;
-import forestry.api.farming.Soil;
+import forestry.api.farming.ISoil;
+import forestry.core.utils.Translator;
 import forestry.core.utils.VectUtil;
 
 public abstract class FarmLogic implements IFarmLogic {
-	private final EntitySelectorFarm entitySelectorFarm;
+	private final EntitySelectorFarm entitySelectorFarm = new EntitySelectorFarm(this);
 	protected final IFarmProperties properties;
 	protected final boolean isManual;
 
 	public FarmLogic(IFarmProperties properties, boolean isManual) {
 		this.properties = properties;
 		this.isManual = isManual;
-		this.entitySelectorFarm = new EntitySelectorFarm(properties);
 	}
 
 	protected Collection<IFarmable> getFarmables() {
 		return properties.getFarmables();
 	}
 
-	protected Collection<Soil> getSoils() {
+	protected Collection<ISoil> getSoils() {
 		return properties.getSoils();
+	}
+
+	@Override
+	public String getName() {
+		String unformatted = isManual ? "for.farm.grammar.manual" : "for.farm.grammar.managed";
+		return Translator.translateToLocalFormatted(unformatted, Translator.translateToLocal(getUnlocalizedName()));
+	}
+
+	@Override
+	public FarmLogic setManual(boolean flag) {
+		return this;
 	}
 
 	@Override
@@ -67,7 +78,7 @@ public abstract class FarmLogic implements IFarmLogic {
 	}
 
 	@Override
-	public Collection<ICrop> harvest(World world, IFarmHousing housing, FarmDirection direction, int extent, BlockPos pos) {
+	public Collection<ICrop> harvest(World world, IFarmHousing housing, BlockPos pos, FarmDirection direction, int extent) {
 		Stack<ICrop> crops = new Stack<>();
 		for (int i = 0; i < extent; i++) {
 			BlockPos position = translateWithOffset(pos.up(), direction, i);
@@ -84,7 +95,7 @@ public abstract class FarmLogic implements IFarmLogic {
 		if (!world.isBlockLoaded(position) || world.isAirBlock(position)) {
 			return null;
 		}
-		BlockState blockState = world.getBlockState(position);
+		IBlockState blockState = world.getBlockState(position);
 		for (IFarmable seed : getFarmables()) {
 			ICrop crop = seed.getCropAt(world, position, blockState);
 			if (crop != null) {
@@ -94,27 +105,15 @@ public abstract class FarmLogic implements IFarmLogic {
 		return null;
 	}
 
-	@Deprecated
-	public boolean isAcceptedWindfall(ItemStack stack) {
-		return false;
-	}
+	public abstract boolean isAcceptedWindfall(ItemStack stack);
 
 	protected final boolean isWaterSourceBlock(World world, BlockPos position) {
 		if (!world.isBlockLoaded(position)) {
 			return false;
 		}
-		BlockState blockState = world.getBlockState(position);
+		IBlockState blockState = world.getBlockState(position);
 		Block block = blockState.getBlock();
 		return block == Blocks.WATER;
-	}
-
-	protected final boolean isIceBlock(World world, BlockPos position) {
-		if (!world.isBlockLoaded(position)) {
-			return false;
-		}
-		BlockState blockState = world.getBlockState(position);
-		Block block = blockState.getBlock();
-		return block == Blocks.ICE;
 	}
 
 	protected final BlockPos translateWithOffset(BlockPos pos, FarmDirection farmDirection, int step) {
@@ -123,8 +122,8 @@ public abstract class FarmLogic implements IFarmLogic {
 
 	private static AxisAlignedBB getHarvestBox(World world, IFarmHousing farmHousing, boolean toWorldHeight) {
 		BlockPos coords = farmHousing.getCoords();
-		Vector3i area = farmHousing.getArea();
-		Vector3i offset = farmHousing.getOffset();
+		Vec3i area = farmHousing.getArea();
+		Vec3i offset = farmHousing.getOffset();
 
 		BlockPos min = coords.add(offset);
 		BlockPos max = min.add(area);
@@ -140,12 +139,12 @@ public abstract class FarmLogic implements IFarmLogic {
 	protected NonNullList<ItemStack> collectEntityItems(World world, IFarmHousing farmHousing, boolean toWorldHeight) {
 		AxisAlignedBB harvestBox = getHarvestBox(world, farmHousing, toWorldHeight);
 
-		List<ItemEntity> entityItems = world.getEntitiesWithinAABB(ItemEntity.class, harvestBox, entitySelectorFarm);
+		List<EntityItem> entityItems = world.getEntitiesWithinAABB(EntityItem.class, harvestBox, entitySelectorFarm);
 		NonNullList<ItemStack> stacks = NonNullList.create();
-		for (ItemEntity entity : entityItems) {
+		for (EntityItem entity : entityItems) {
 			ItemStack contained = entity.getItem();
 			stacks.add(contained.copy());
-			entity.remove();
+			entity.setDead();
 		}
 		return stacks;
 	}
@@ -153,29 +152,28 @@ public abstract class FarmLogic implements IFarmLogic {
 	// for debugging
 	@Override
 	public String toString() {
-		return properties.getTranslationKey();
+		return getName();
 	}
 
-	private static class EntitySelectorFarm implements Predicate<ItemEntity> {
-		private final IFarmProperties properties;
+	private static class EntitySelectorFarm implements Predicate<EntityItem> {
+		private final FarmLogic farmLogic;
 
-		public EntitySelectorFarm(IFarmProperties properties) {
-			this.properties = properties;
+		public EntitySelectorFarm(FarmLogic farmLogic) {
+			this.farmLogic = farmLogic;
 		}
 
 		@Override
-		public boolean apply(@Nullable ItemEntity entity) {
-			if (entity == null || !entity.isAlive()) {
+		public boolean apply(@Nullable EntityItem entity) {
+			if (entity == null || entity.isDead) {
 				return false;
 			}
 
-			//TODO not sure if this key still exists
-			if (entity.getPersistentData().getBoolean("PreventRemoteMovement")) {
+			if (entity.getEntityData().getBoolean("PreventRemoteMovement")) {
 				return false;
 			}
 
 			ItemStack contained = entity.getItem();
-			return properties.isAcceptedSeedling(contained) || properties.isAcceptedWindfall(contained);
+			return farmLogic.isAcceptedGermling(contained) || farmLogic.isAcceptedWindfall(contained);
 		}
 	}
 }

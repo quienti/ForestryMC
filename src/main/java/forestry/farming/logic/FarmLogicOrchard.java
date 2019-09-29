@@ -16,13 +16,16 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.Stack;
 
 import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
+import net.minecraft.block.state.IBlockState;
+import net.minecraft.item.ItemStack;
+import net.minecraft.util.NonNullList;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 
@@ -32,11 +35,13 @@ import forestry.api.farming.IFarmHousing;
 import forestry.api.farming.IFarmProperties;
 import forestry.api.farming.IFarmable;
 import forestry.api.genetics.IFruitBearer;
+import forestry.core.ModuleCore;
 import forestry.core.tiles.TileUtil;
 import forestry.farming.logic.crops.CropFruit;
 
 public class FarmLogicOrchard extends FarmLogic {
 
+	private final HashMap<BlockPos, Integer> lastExtents = new HashMap<>();
 	private final ImmutableList<Block> traversalBlocks;
 
 	public FarmLogicOrchard(IFarmProperties properties, boolean isManual) {
@@ -63,12 +68,67 @@ public class FarmLogicOrchard extends FarmLogic {
 	}
 
 	@Override
-	public Collection<ICrop> harvest(World world, IFarmHousing housing, FarmDirection direction, int extent, BlockPos pos) {
-		BlockPos position = housing.getValidPosition(direction, pos, extent, pos.up());
+	public int getFertilizerConsumption() {
+		return 10;
+	}
+
+	@Override
+	public int getWaterConsumption(float hydrationModifier) {
+		return (int) (40 * hydrationModifier);
+	}
+
+	@Override
+	public boolean isAcceptedResource(ItemStack itemstack) {
+		return false;
+	}
+
+	@Override
+	public boolean isAcceptedGermling(ItemStack itemstack) {
+		return false;
+	}
+
+	@Override
+	public boolean isAcceptedWindfall(ItemStack stack) {
+		return false;
+	}
+
+	@Override
+	public NonNullList<ItemStack> collect(World world, IFarmHousing farmHousing) {
+		return NonNullList.create();
+	}
+
+	@Override
+	public boolean cultivate(World world, IFarmHousing farmHousing, BlockPos pos, FarmDirection direction, int extent) {
+		return false;
+	}
+
+	@Override
+	public Collection<ICrop> harvest(World world, IFarmHousing housing, BlockPos pos, FarmDirection direction, int extent) {
+		if (!lastExtents.containsKey(pos)) {
+			lastExtents.put(pos, 0);
+		}
+
+		int lastExtent = lastExtents.get(pos);
+		if (lastExtent > extent) {
+			lastExtent = 0;
+		}
+
+		BlockPos position = translateWithOffset(pos.up(), direction, lastExtent);
 		Collection<ICrop> crops = getHarvestBlocks(world, position);
-		housing.increaseExtent(direction, pos, extent);
+		lastExtent++;
+		lastExtents.put(pos, lastExtent);
 
 		return crops;
+	}
+
+	@Override
+	public ItemStack getIconItemStack() {
+		return new ItemStack(ModuleCore.getItems().fruits);
+	}
+
+	@Override
+	public String getUnlocalizedName() {
+		return "for.farm.orchard";
 	}
 
 	private Collection<ICrop> getHarvestBlocks(World world, BlockPos position) {
@@ -80,10 +140,9 @@ public class FarmLogicOrchard extends FarmLogic {
 		}
 
 		// Determine what type we want to harvest.
-		BlockState blockState = world.getBlockState(position);
+		IBlockState blockState = world.getBlockState(position);
 		Block block = blockState.getBlock();
-		//TODO tags
-		if (false) {//!block.isWood(world, position) && !isBlockTraversable(blockState, traversalBlocks) && !isFruitBearer(world, position, blockState)) {
+		if (!block.isWood(world, position) && !isBlockTraversable(blockState, traversalBlocks) && !isFruitBearer(world, position, blockState)) {
 			return crops;
 		}
 
@@ -124,9 +183,9 @@ public class FarmLogicOrchard extends FarmLogic {
 						continue;
 					}
 
-					BlockState blockState = world.getBlockState(candidate);
+					IBlockState blockState = world.getBlockState(candidate);
 					Block block = blockState.getBlock();
-					if (false) {//block.isWood(world, candidate) || isBlockTraversable(blockState, traversalBlocks)) {
+					if (block.isWood(world, candidate) || isBlockTraversable(blockState, traversalBlocks)) {
 						candidates.add(candidate);
 						seen.add(candidate);
 					}
@@ -146,7 +205,7 @@ public class FarmLogicOrchard extends FarmLogic {
 		return candidates;
 	}
 
-	private boolean isFruitBearer(World world, BlockPos position, BlockState blockState) {
+	private boolean isFruitBearer(World world, BlockPos position, IBlockState blockState) {
 		IFruitBearer tile = TileUtil.getTile(world, position, IFruitBearer.class);
 		if (tile != null) {
 			return true;
@@ -161,7 +220,7 @@ public class FarmLogicOrchard extends FarmLogic {
 		return false;
 	}
 
-	private static boolean isBlockTraversable(BlockState blockState, ImmutableList<Block> traversalBlocks) {
+	private static boolean isBlockTraversable(IBlockState blockState, ImmutableList<Block> traversalBlocks) {
 		Block candidate = blockState.getBlock();
 		for (Block block : traversalBlocks) {
 			if (block == candidate) {

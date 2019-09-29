@@ -21,8 +21,8 @@ import java.util.List;
 import java.util.Map;
 
 import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.util.Direction;
+import net.minecraft.init.Blocks;
+import net.minecraft.util.EnumFacing;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 
@@ -31,7 +31,7 @@ import forestry.api.farming.ICrop;
 import forestry.api.farming.IFarmHousing;
 import forestry.api.farming.IFarmListener;
 import forestry.api.farming.IFarmLogic;
-import forestry.core.utils.VectUtil;
+import forestry.core.utils.TopDownBlockPosComparator;
 
 public class FarmHelper {
 
@@ -54,7 +54,7 @@ public class FarmHelper {
 		public boolean hasLiquid = true;
 	}
 
-	public static FarmDirection getLayoutDirection(FarmDirection farmSide) {
+	private static FarmDirection getLayoutDirection(FarmDirection farmSide) {
 		switch (farmSide) {
 			case NORTH:
 				return FarmDirection.WEST;
@@ -64,35 +64,21 @@ public class FarmHelper {
 				return FarmDirection.EAST;
 			case EAST:
 				return FarmDirection.NORTH;
-		}
-		return null;
-	}
-
-	public static FarmDirection getReversedLayoutDirection(FarmDirection farmSide) {
-		switch (farmSide) {
-			case NORTH:
-				return FarmDirection.EAST;
-			case WEST:
-				return FarmDirection.NORTH;
-			case SOUTH:
-				return FarmDirection.WEST;
-			case EAST:
-				return FarmDirection.SOUTH;
 		}
 		return null;
 	}
 
 	public static final ImmutableSet<Block> bricks = ImmutableSet.of(
-		Blocks.BRICKS,
-		Blocks.STONE_BRICKS,
+		Blocks.BRICK_BLOCK,
+		Blocks.STONEBRICK,
 		Blocks.SANDSTONE,
-		Blocks.NETHER_BRICKS,
+		Blocks.NETHER_BRICK,
 		Blocks.QUARTZ_BLOCK
 	);
 
 	private static FarmDirection getOpposite(FarmDirection farmDirection) {
-		Direction forgeDirection = farmDirection.getFacing();
-		Direction forgeDirectionOpposite = forgeDirection.getOpposite();
+		EnumFacing forgeDirection = farmDirection.getFacing();
+		EnumFacing forgeDirectionOpposite = forgeDirection.getOpposite();
 		return FarmDirection.getFarmDirection(forgeDirectionOpposite);
 	}
 
@@ -228,7 +214,7 @@ public class FarmHelper {
 
 	public static Collection<ICrop> harvestTarget(World world, IFarmHousing housing, FarmTarget target, IFarmLogic logic, Iterable<IFarmListener> farmListeners) {
 		BlockPos pos = target.getStart().add(0, target.getYOffset(), 0);
-		Collection<ICrop> harvested = logic.harvest(world, housing, target.getDirection(), target.getExtent(), pos);
+		Collection<ICrop> harvested = logic.harvest(world, housing, pos, target.getDirection(), target.getExtent());
 		if (!harvested.isEmpty()) {
 			// Let event handlers know.
 			for (IFarmListener listener : farmListeners) {
@@ -247,7 +233,7 @@ public class FarmHelper {
 
 		@Override
 		public int compare(ICrop o1, ICrop o2) {
-			return VectUtil.TOP_DOWN_COMPARATOR.compare(o1.getPosition(), o2.getPosition());
+			return TopDownBlockPosComparator.INSTANCE.compare(o1.getPosition(), o2.getPosition());
 		}
 	}
 }
