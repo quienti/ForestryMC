@@ -10,15 +10,11 @@
  ******************************************************************************/
 package forestry.farming.multiblock;
 
-import java.util.List;
-import java.util.Map;
-import java.util.Stack;
-
 import net.minecraft.inventory.IInventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.NonNullList;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.vector.Vector3i;
+import net.minecraft.util.math.Vec3i;
 import net.minecraft.world.World;
 
 import net.minecraftforge.fluids.FluidStack;
@@ -26,6 +22,7 @@ import net.minecraftforge.fluids.FluidStack;
 import forestry.api.circuits.CircuitSocketType;
 import forestry.api.circuits.ICircuitSocketType;
 import forestry.api.farming.FarmDirection;
+import forestry.api.farming.IFarmInventory;
 import forestry.api.farming.IFarmLogic;
 import forestry.api.farming.IFarmable;
 import forestry.core.fluids.FakeTankManager;
@@ -34,7 +31,6 @@ import forestry.core.inventory.FakeInventoryAdapter;
 import forestry.core.inventory.IInventoryAdapter;
 import forestry.core.multiblock.FakeMultiblockController;
 import forestry.farming.FarmRegistry;
-import forestry.farming.FarmTarget;
 import forestry.farming.gui.IFarmLedgerDelegate;
 import forestry.farming.logic.ForestryFarmIdentifier;
 
@@ -47,17 +43,17 @@ public class FakeFarmController extends FakeMultiblockController implements IFar
 
 	@Override
 	public BlockPos getCoords() {
-		return BlockPos.ZERO;
+		return BlockPos.ORIGIN;
 	}
 
 	@Override
-	public Vector3i getArea() {
-		return Vector3i.NULL_VECTOR;
+	public Vec3i getArea() {
+		return Vec3i.NULL_VECTOR;
 	}
 
 	@Override
-	public Vector3i getOffset() {
-		return Vector3i.NULL_VECTOR;
+	public Vec3i getOffset() {
+		return Vec3i.NULL_VECTOR;
 	}
 
 	@Override
@@ -76,32 +72,13 @@ public class FakeFarmController extends FakeMultiblockController implements IFar
 	}
 
 	@Override
-	public boolean plantGermling(IFarmable farmable, World world, BlockPos pos, FarmDirection direction) {
+	public boolean plantGermling(IFarmable farmable, World world, BlockPos pos) {
 		return false;
 	}
 
 	@Override
-	public IFarmInventoryInternal getFarmInventory() {
+	public IFarmInventory getFarmInventory() {
 		return FakeFarmInventory.instance;
-	}
-
-	@Override
-	public void setUpFarmlandTargets(Map<FarmDirection, List<FarmTarget>> targets) {
-	}
-
-	@Override
-	public BlockPos getTopCoord() {
-		return BlockPos.ZERO;
-	}
-
-	@Override
-	public BlockPos getCoordinates() {
-		return BlockPos.ZERO;
-	}
-
-	@Override
-	public void addPendingProduct(ItemStack stack) {
-
 	}
 
 	@Override
@@ -125,8 +102,8 @@ public class FakeFarmController extends FakeMultiblockController implements IFar
 	}
 
 	@Override
-	public BlockPos getFarmCorner(FarmDirection direction) {
-		return null;
+	public void addPendingProduce(ItemStack stack) {
+
 	}
 
 	@Override
@@ -174,22 +151,7 @@ public class FakeFarmController extends FakeMultiblockController implements IFar
 		return false;
 	}
 
-	@Override
-	public int getExtents(FarmDirection direction, BlockPos pos) {
-		return 0;
-	}
-
-	@Override
-	public void setExtents(FarmDirection direction, BlockPos pos, int extend) {
-
-	}
-
-	@Override
-	public void cleanExtents(FarmDirection direction) {
-
-	}
-
-	private static class FakeFarmInventory implements IFarmInventoryInternal {
+	private static class FakeFarmInventory implements IFarmInventory {
 		public static final FakeFarmInventory instance = new FakeFarmInventory();
 
 		private FakeFarmInventory() {
@@ -207,7 +169,7 @@ public class FakeFarmController extends FakeMultiblockController implements IFar
 		}
 
 		@Override
-		public boolean acceptsAsSeedling(ItemStack itemstack) {
+		public boolean acceptsAsGermling(ItemStack itemstack) {
 			return false;
 		}
 
@@ -239,26 +201,6 @@ public class FakeFarmController extends FakeMultiblockController implements IFar
 		@Override
 		public IInventory getFertilizerInventory() {
 			return FakeInventoryAdapter.instance();
-		}
-
-		@Override
-		public int getFertilizerValue() {
-			return 0;
-		}
-
-		@Override
-		public boolean useFertilizer() {
-			return false;
-		}
-
-		@Override
-		public void stowProducts(Iterable<ItemStack> harvested, Stack<ItemStack> pendingProduce) {
-
-		}
-
-		@Override
-		public boolean tryAddPendingProduce(Stack<ItemStack> pendingProduce) {
-			return false;
 		}
 	}
 

@@ -7,20 +7,20 @@ package forestry.api.farming;
 
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.vector.Vector3i;
+import net.minecraft.util.math.Vec3i;
 import net.minecraft.world.World;
 
 import net.minecraftforge.fluids.FluidStack;
 
 import forestry.api.core.IErrorLogicSource;
 
-public interface IFarmHousing extends IErrorLogicSource, IExtentCache {
+public interface IFarmHousing extends IErrorLogicSource {
 
 	BlockPos getCoords();
 
-	Vector3i getArea();
+	Vec3i getArea();
 
-	Vector3i getOffset();
+	Vec3i getOffset();
 
 	/**
 	 * @return true if any work was done, false otherwise.
@@ -31,9 +31,16 @@ public interface IFarmHousing extends IErrorLogicSource, IExtentCache {
 
 	void removeLiquid(FluidStack liquid);
 
-	float getExactTemperature();
-
-	float getExactHumidity();
+	/**
+	 * Callback for {@link IFarmLogic}s to plant a sapling, seed, germling, stem.
+	 * Will remove the appropriate germling from the farm's inventory.
+	 * It's up to the logic to only call this on a valid location.
+	 *
+	 * @return true if planting was successful, false otherwise.
+	 * @deprecated TODO remove this method in 1.13
+	 */
+	@Deprecated
+	boolean plantGermling(IFarmable farmable, World world, BlockPos pos);
 
 	/**
 	 * Callback for {@link IFarmLogic}s to plant a sapling, seed, germling, stem.
@@ -42,7 +49,9 @@ public interface IFarmHousing extends IErrorLogicSource, IExtentCache {
 	 *
 	 * @return true if planting was successful, false otherwise.
 	 */
-	boolean plantGermling(IFarmable farmable, World world, BlockPos pos, FarmDirection direction);
+	default boolean plantGermling(IFarmable farmable, World world, BlockPos pos, FarmDirection direction) {
+		return plantGermling(farmable, world, pos);
+	}
 
 	default boolean isValidPlatform(World world, BlockPos pos) {
 		return false;
@@ -59,8 +68,6 @@ public interface IFarmHousing extends IErrorLogicSource, IExtentCache {
 	/* INTERACTION WITH HATCHES */
 	IFarmInventory getFarmInventory();
 
-	void addPendingProduct(ItemStack stack);
-
 	/* LOGIC */
 	void setFarmLogic(FarmDirection direction, IFarmLogic logic);
 
@@ -71,5 +78,7 @@ public interface IFarmHousing extends IErrorLogicSource, IExtentCache {
 	/* GUI */
 	int getStoredFertilizerScaled(int scale);
 
-	BlockPos getFarmCorner(FarmDirection direction);
+	default void addPendingProduce(ItemStack stack) {
+
+	}
 }

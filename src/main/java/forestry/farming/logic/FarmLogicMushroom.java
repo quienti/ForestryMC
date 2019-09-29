@@ -10,6 +10,7 @@
  ******************************************************************************/
 package forestry.farming.logic;
 
+import net.minecraft.init.Blocks;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.NonNullList;
 import net.minecraft.world.World;
@@ -24,8 +25,28 @@ public class FarmLogicMushroom extends FarmLogicArboreal {
 	}
 
 	@Override
+	public String getUnlocalizedName() {
+		return "for.farm.shroom";
+	}
+
+	@Override
+	public ItemStack getIconItemStack() {
+		return new ItemStack(Blocks.RED_MUSHROOM);
+	}
+
+	@Override
+	public int getFertilizerConsumption() {
+		return 20;
+	}
+
+	@Override
+	public int getWaterConsumption(float hydrationModifier) {
+		return (int) (80 * hydrationModifier);
+	}
+
+	@Override
 	public NonNullList<ItemStack> collect(World world, IFarmHousing farmHousing) {
-		return NonNullList.create();//Needed to override Arboreal #collect
+		return NonNullList.create();
 	}
 
 }
