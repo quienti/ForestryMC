@@ -12,28 +12,43 @@ package forestry.farming.logic;
 
 import org.apache.commons.lang3.tuple.Pair;
 
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.fluid.Fluids;
+import net.minecraft.block.state.IBlockState;
+import net.minecraft.init.Blocks;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.NonNullList;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 
-import net.minecraftforge.fluids.FluidAttributes;
+import net.minecraftforge.fluids.Fluid;
+import net.minecraftforge.fluids.FluidRegistry;
 import net.minecraftforge.fluids.FluidStack;
 
 import forestry.api.farming.FarmDirection;
 import forestry.api.farming.IFarmHousing;
 import forestry.api.farming.IFarmProperties;
-import forestry.api.farming.Soil;
+import forestry.api.farming.ISoil;
 import forestry.core.utils.BlockUtil;
 
 public abstract class FarmLogicWatered extends FarmLogicSoil {
-	private static final FluidStack STACK_WATER = new FluidStack(Fluids.WATER, FluidAttributes.BUCKET_VOLUME);
+	private static final FluidStack STACK_WATER = new FluidStack(FluidRegistry.WATER, Fluid.BUCKET_VOLUME);
 
 	public FarmLogicWatered(IFarmProperties properties, boolean isManual) {
 		super(properties, isManual);
+	}
+
+	@Override
+	public int getFertilizerConsumption() {
+		return 5;
+	}
+
+	@Override
+	public int getWaterConsumption(float hydrationModifier) {
+		return (int) (20 * hydrationModifier);
+	}
+
+	@Override
+	public NonNullList<ItemStack> collect(World world, IFarmHousing farmHousing) {
+		return NonNullList.create();
 	}
 
 	@Override
@@ -50,16 +65,12 @@ public abstract class FarmLogicWatered extends FarmLogicSoil {
 
 	}
 
-	protected boolean isValidPosition(IFarmHousing housing, FarmDirection direction, BlockPos pos, CultivationType type) {
-		return true;
-	}
-
 	private boolean maintainSoil(World world, IFarmHousing farmHousing, BlockPos pos, FarmDirection direction, int extent) {
 		if (!farmHousing.canPlantSoil(isManual)) {
 			return false;
 		}
 
-		for (Soil soil : getSoils()) {
+		for (ISoil soil : getSoils()) {
 			NonNullList<ItemStack> resources = NonNullList.create();
 			resources.add(soil.getResource());
 
@@ -69,12 +80,8 @@ public abstract class FarmLogicWatered extends FarmLogicSoil {
 					break;
 				}
 
-				BlockState state = world.getBlockState(position);
-				if (!isValidPosition(farmHousing, direction, position, CultivationType.SOIL)
-					|| !BlockUtil.isBreakableBlock(state, world, pos)
-					|| isAcceptedSoil(state)
-					|| isWaterSourceBlock(world, position)
-					|| !farmHousing.getFarmInventory().hasResources(resources)) {
+				IBlockState state = world.getBlockState(position);
+				if (!BlockUtil.isBreakableBlock(state, world, pos) || isAcceptedSoil(state) || isWaterSourceBlock(world, position) || !farmHousing.getFarmInventory().hasResources(resources)) {
 					continue;
 				}
 
@@ -84,8 +91,8 @@ public abstract class FarmLogicWatered extends FarmLogicSoil {
 				}
 
 				if (!BlockUtil.isReplaceableBlock(state, world, position)) {
-					BlockUtil.getBlockDrops(world, position).forEach(farmHousing::addPendingProduct);
-					world.removeBlock(position, false);    //TODO
+					BlockUtil.getBlockDrops(world, position).forEach(farmHousing::addPendingProduce);
+					world.setBlockToAir(position);
 					return trySetSoil(world, farmHousing, position, soil.getResource(), soil.getSoilState());
 				}
 
@@ -111,10 +118,6 @@ public abstract class FarmLogicWatered extends FarmLogicSoil {
 				break;
 			}
 
-			if (!isValidPosition(farmHousing, direction, position, CultivationType.WATER)) {
-				continue;
-			}
-
 			BlockPos platformPosition = position.down();
 			if (!farmHousing.isValidPlatform(world, platformPosition)) {
 				break;
@@ -132,7 +135,7 @@ public abstract class FarmLogicWatered extends FarmLogicSoil {
 		return false;
 	}
 
-	private boolean trySetSoil(World world, IFarmHousing farmHousing, BlockPos position, ItemStack resource, BlockState ground) {
+	private boolean trySetSoil(World world, IFarmHousing farmHousing, BlockPos position, ItemStack resource, IBlockState ground) {
 		NonNullList<ItemStack> resources = NonNullList.create();
 		resources.add(resource);
 		if (!farmHousing.getFarmInventory().hasResources(resources)) {
@@ -156,7 +159,7 @@ public abstract class FarmLogicWatered extends FarmLogicSoil {
 				return false;
 			}
 
-			BlockUtil.getBlockDrops(world, position).forEach(farmHousing::addPendingProduct);
+			BlockUtil.getBlockDrops(world, position).forEach(farmHousing::addPendingProduce);
 			BlockUtil.setBlockWithPlaceSound(world, position, Blocks.WATER.getDefaultState());
 			farmHousing.removeLiquid(STACK_WATER);
 			return true;
@@ -172,7 +175,7 @@ public abstract class FarmLogicWatered extends FarmLogicSoil {
 			for (int z = -2; z <= 2; z++) {
 				BlockPos offsetPosition = position.add(x, 0, z);
 				if (isWaterSourceBlock(world, offsetPosition)) {
-					return Pair.of(WaterStatus.WATER_SOURCE, BlockPos.ZERO);
+					return Pair.of(WaterStatus.WATER_SOURCE, BlockPos.ORIGIN);
 				}
 				if (isIceBlock(world, offsetPosition) && !couldFlow(world, offsetPosition)) {
 					return Pair.of(WaterStatus.ICE, offsetPosition);
@@ -182,10 +185,10 @@ public abstract class FarmLogicWatered extends FarmLogicSoil {
 
 		// don't place water if it can flow into blocks next to it
 		if (couldFlow(world, position)) {
-			return Pair.of(WaterStatus.AIR, BlockPos.ZERO);
+			return Pair.of(WaterStatus.AIR, BlockPos.ORIGIN);
 		}
 
-		return Pair.of(WaterStatus.NO_WATER, BlockPos.ZERO);
+		return Pair.of(WaterStatus.NO_WATER, BlockPos.ORIGIN);
 	}
 
 	private boolean couldFlow(World world, BlockPos position) {
@@ -206,10 +209,6 @@ public abstract class FarmLogicWatered extends FarmLogicSoil {
 
 	private enum WaterStatus {
 		NO_WATER, WATER_SOURCE, AIR, ICE
-	}
-
-	public enum CultivationType {
-		WATER, SOIL, CROP
 	}
 
 }
