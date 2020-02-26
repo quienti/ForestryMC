@@ -1,26 +1,21 @@
 package forestry.arboriculture;
 
+import forestry.api.arboriculture.EnumTreeChromosome;
+import forestry.api.arboriculture.IAlleleTreeSpecies;
+import forestry.api.genetics.AlleleManager;
+import forestry.api.genetics.IAllele;
+import forestry.core.config.LocalizedConfiguration;
+import forestry.core.utils.Log;
+import net.minecraft.util.ResourceLocation;
+import net.minecraft.world.biome.Biome;
+import net.minecraftforge.common.BiomeDictionary;
+import net.minecraftforge.fml.common.registry.ForgeRegistries;
+
 import javax.annotation.Nullable;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
-
-import net.minecraft.util.ResourceLocation;
-import net.minecraft.world.biome.Biome;
-
-import net.minecraftforge.common.BiomeDictionary;
-import net.minecraftforge.registries.ForgeRegistries;
-
-import genetics.api.alleles.IAllele;
-
-import genetics.utils.AlleleUtils;
-
-import forestry.api.arboriculture.genetics.IAlleleTreeSpecies;
-import forestry.api.arboriculture.genetics.TreeChromosomes;
-import forestry.core.config.Constants;
-import forestry.core.config.LocalizedConfiguration;
-import forestry.core.utils.Log;
 
 public class TreeConfig {
 	public static final String CONFIG_CATEGORY_TREE = "trees";
@@ -52,10 +47,10 @@ public class TreeConfig {
 			"\t\t >\n" +
 			"\t}\n" +
 			"}";
-	private static final Map<ResourceLocation, TreeConfig> configs = new HashMap<>();
-	private static final TreeConfig GLOBAL = new TreeConfig(new ResourceLocation(Constants.MOD_ID, "global"), 1.0F);
+	private static final Map<String, TreeConfig> configs = new HashMap<>();
+	private static final TreeConfig GLOBAL = new TreeConfig("global", 1.0F);
 
-	private final ResourceLocation treeName;
+	private final String treeName;
 	private final float defaultRarity;
 	private final Set<Integer> blacklistedDimensions = new HashSet<>();
 	private final Set<Integer> whitelistedDimensions = new HashSet<>();
@@ -67,13 +62,16 @@ public class TreeConfig {
 		config.setCategoryComment(CONFIG_CATEGORY_TREE, CONFIG_COMMENT);
 		config.setCategoryComment(CONFIG_CATEGORY_TREE + ".global", "All options defined in the global category are used for all trees.");
 		GLOBAL.parseConfig(config);
-		for (IAllele treeAllele : AlleleUtils.filteredAlleles(TreeChromosomes.SPECIES)) {
+		for (IAllele treeAllele : AlleleManager.alleleRegistry.getRegisteredAlleles(EnumTreeChromosome.SPECIES)) {
+			if (!(treeAllele instanceof IAlleleTreeSpecies)) {
+				continue;
+			}
 			IAlleleTreeSpecies treeSpecies = (IAlleleTreeSpecies) treeAllele;
-			configs.put(treeSpecies.getRegistryName(), new TreeConfig(treeSpecies.getRegistryName(), treeSpecies.getRarity()).parseConfig(config));
+			configs.put(treeSpecies.getUID(), new TreeConfig(treeSpecies.getUID(), treeSpecies.getRarity()).parseConfig(config));
 		}
 	}
 
-	private TreeConfig(ResourceLocation treeName, float defaultRarity) {
+	private TreeConfig(String treeName, float defaultRarity) {
 		this.treeName = treeName;
 		this.defaultRarity = defaultRarity;
 		this.spawnRarity = defaultRarity;
@@ -102,7 +100,7 @@ public class TreeConfig {
 		return this;
 	}
 
-	public static void blacklistTreeDim(@Nullable ResourceLocation treeUID, int dimID) {
+	public static void blacklistTreeDim(@Nullable String treeUID, int dimID) {
 		TreeConfig treeConfig = configs.get(treeUID);
 		if (treeUID == null) {
 			treeConfig = GLOBAL;
@@ -110,7 +108,7 @@ public class TreeConfig {
 		treeConfig.blacklistedDimensions.add(dimID);
 	}
 
-	public static void whitelistTreeDim(@Nullable ResourceLocation treeUID, int dimID) {
+	public static void whitelistTreeDim(@Nullable String treeUID, int dimID) {
 		TreeConfig treeConfig = configs.get(treeUID);
 		if (treeUID == null) {
 			treeConfig = GLOBAL;
@@ -118,9 +116,9 @@ public class TreeConfig {
 		treeConfig.whitelistedDimensions.add(dimID);
 	}
 
-	public static boolean isValidDimension(@Nullable ResourceLocation treeUID, int dimID) {
+	public static boolean isValidDimension(@Nullable String treeUID, int dimID) {
 		TreeConfig treeConfig = configs.get(treeUID);
-		return treeConfig != null ? treeConfig.isValidDimension(dimID) : GLOBAL.isValidDimension(dimID);
+        return treeConfig != null ? treeConfig.isValidDimension(dimID) : GLOBAL.isValidDimension(dimID);
 	}
 
 	private boolean isValidDimension(int dimID) { //blacklist has priority
@@ -130,9 +128,9 @@ public class TreeConfig {
 		return false;
 	}
 
-	public static boolean isValidBiome(@Nullable ResourceLocation treeUID, Biome biome) {
+	public static boolean isValidBiome(@Nullable String treeUID, Biome biome) {
 		TreeConfig treeConfig = configs.get(treeUID);
-		return treeUID != null ? treeConfig.isValidBiome(biome) : GLOBAL.isValidBiome(biome);
+        return treeUID != null ? treeConfig.isValidBiome(biome) : GLOBAL.isValidBiome(biome);
 	}
 
 	private boolean isValidBiome(Biome biome) {
@@ -142,7 +140,7 @@ public class TreeConfig {
 		return BiomeDictionary.getTypes(biome).stream().noneMatch(blacklistedBiomeTypes::contains);
 	}
 
-	public static float getSpawnRarity(@Nullable ResourceLocation treeUID) {
+	public static float getSpawnRarity(@Nullable String treeUID) {
 		TreeConfig treeConfig = configs.get(treeUID);
 		if (treeUID == null) {
 			treeConfig = GLOBAL;
