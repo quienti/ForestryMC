@@ -12,56 +12,65 @@ package forestry.core.blocks;
 
 import javax.annotation.Nullable;
 
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockRenderType;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.HorizontalBlock;
+import net.minecraft.block.BlockHorizontal;
 import net.minecraft.block.material.Material;
+import net.minecraft.block.properties.PropertyEnum;
+import net.minecraft.block.state.BlockStateContainer;
+import net.minecraft.block.state.IBlockState;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.particle.ParticleManager;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.entity.player.ServerPlayerEntity;
+import net.minecraft.client.renderer.texture.TextureMap;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityLivingBase;
+import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.inventory.IInventory;
-import net.minecraft.item.BlockItemUseContext;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
-import net.minecraft.state.EnumProperty;
-import net.minecraft.state.StateContainer;
 import net.minecraft.tileentity.TileEntity;
-import net.minecraft.util.ActionResultType;
-import net.minecraft.util.Direction;
-import net.minecraft.util.Hand;
+import net.minecraft.util.EnumBlockRenderType;
+import net.minecraft.util.EnumFacing;
+import net.minecraft.util.EnumHand;
+import net.minecraft.util.IStringSerializable;
+import net.minecraft.util.Mirror;
+import net.minecraft.util.ResourceLocation;
 import net.minecraft.util.Rotation;
+import net.minecraft.util.math.AxisAlignedBB;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.BlockRayTraceResult;
+import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.RayTraceResult;
-import net.minecraft.util.math.shapes.ISelectionContext;
-import net.minecraft.util.math.shapes.VoxelShape;
-import net.minecraft.world.IBlockReader;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.IBlockAccess;
 import net.minecraft.world.World;
 
 import com.mojang.authlib.GameProfile;
 
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.client.model.ModelLoader;
 import net.minecraftforge.fluids.FluidUtil;
 
+import net.minecraftforge.fml.relauncher.Side;
+import net.minecraftforge.fml.relauncher.SideOnly;
+
+import forestry.api.core.IItemModelRegister;
+import forestry.api.core.IModelManager;
 import forestry.api.core.ISpriteRegister;
-import forestry.api.core.ISpriteRegistry;
+import forestry.api.core.IStateMapperRegister;
+import forestry.api.core.ITextureManager;
 import forestry.core.circuits.ISocketable;
 import forestry.core.owner.IOwnedTile;
 import forestry.core.owner.IOwnerHandler;
 import forestry.core.render.MachineParticleCallback;
+import forestry.core.render.MachineStateMapper;
 import forestry.core.render.ParticleHelper;
 import forestry.core.tiles.TileBase;
 import forestry.core.tiles.TileForestry;
 import forestry.core.tiles.TileUtil;
 import forestry.core.utils.InventoryUtil;
 
-public class BlockBase<P extends Enum<P> & IBlockType> extends BlockForestry implements ISpriteRegister {
+public class BlockBase<P extends Enum<P> & IBlockType & IStringSerializable> extends BlockForestry implements IItemModelRegister, ISpriteRegister, IStateMapperRegister, IBlockRotatable {
 	/**
-	 * use this instead of {@link HorizontalBlock#HORIZONTAL_FACING} so the blocks rotate in a circle instead of NSWE order.
+	 * use this instead of {@link BlockHorizontal#FACING} so the blocks rotate in a circle instead of NSWE order.
 	 */
-	public static final EnumProperty<Direction> FACING = EnumProperty.create("facing", Direction.class, Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST, Direction.DOWN, Direction.UP);
+	public static final PropertyEnum<EnumFacing> FACING = PropertyEnum.create("facing", EnumFacing.class, EnumFacing.NORTH, EnumFacing.EAST, EnumFacing.SOUTH, EnumFacing.WEST, EnumFacing.DOWN, EnumFacing.UP);
 
 	private final boolean hasTESR;
 	private final boolean hasCustom;
@@ -69,63 +78,42 @@ public class BlockBase<P extends Enum<P> & IBlockType> extends BlockForestry imp
 
 	private final ParticleHelper.Callback particleCallback;
 
-	public BlockBase(P blockType, Block.Properties properties) {
-		super(properties.setOpaque((state, reader, pos) -> !(blockType instanceof IBlockTypeTesr) && !(blockType instanceof IBlockTypeCustom)));
-		this.setDefaultState(this.getStateContainer().getBaseState().with(FACING, Direction.NORTH));
+	public BlockBase(P blockType, Material material) {
+		super(material);
 
 		this.blockType = blockType;
 		blockType.getMachineProperties().setBlock(this);
 
 		this.hasTESR = blockType instanceof IBlockTypeTesr;
 		this.hasCustom = blockType instanceof IBlockTypeCustom;
+		this.lightOpacity = (!hasTESR && !hasCustom) ? 255 : 0;
+
+		this.setDefaultState(blockState.getBaseState().withProperty(FACING, EnumFacing.NORTH));
 
 		particleCallback = new MachineParticleCallback<>(this, blockType);
-
-	}
-
-	@Override
-	public int getOpacity(BlockState state, IBlockReader world, BlockPos pos) {
-		return (!hasTESR && !hasCustom) ? super.getOpacity(state, world, pos) : 0;
-	}
-
-	@Override
-	protected void fillStateContainer(StateContainer.Builder<Block, BlockState> builder) {
-		super.fillStateContainer(builder);
-		builder.add(FACING);
-	}
-
-	public BlockBase(P blockType, Material material) {
-		this(blockType, Block.Properties.create(material));
 	}
 
 	public BlockBase(P blockType) {
 		this(blockType, Material.IRON);
 	}
 
-
-	//TODO: Still needed? Should be replaced with voxel shapes vor every tesr or custom block
-	/*@Override
-	public boolean isNormalCube(BlockState state, IBlockReader reader, BlockPos pos) {
+	@Override
+	public boolean isOpaqueCube(IBlockState state) {
 		return !hasTESR && !hasCustom;
-	}*/
+	}
 
 	@Override
-	public BlockRenderType getRenderType(BlockState state) {
+	public boolean isNormalCube(IBlockState state) {
+		return !hasTESR && !hasCustom;
+	}
+
+	@Override
+	public EnumBlockRenderType getRenderType(IBlockState state) {
 		if (hasTESR) {
-			return BlockRenderType.ENTITYBLOCK_ANIMATED;
+			return EnumBlockRenderType.ENTITYBLOCK_ANIMATED;
 		} else {
-			return BlockRenderType.MODEL;
+			return EnumBlockRenderType.MODEL;
 		}
-	}
-
-	@Override
-	public boolean hasTileEntity(BlockState state) {
-		return true;
-	}
-
-	@Override
-	public TileEntity createTileEntity(BlockState state, IBlockReader world) {
-		return getDefinition().createTileEntity();
 	}
 
 
@@ -133,45 +121,83 @@ public class BlockBase<P extends Enum<P> & IBlockType> extends BlockForestry imp
 		return blockType.getMachineProperties();
 	}
 
+	@Nullable
 	@Override
-	public VoxelShape getShape(BlockState state, IBlockReader reader, BlockPos pos, ISelectionContext context) {
+	public AxisAlignedBB getCollisionBoundingBox(IBlockState blockState, IBlockAccess worldIn, BlockPos pos) {
 		IMachineProperties definition = getDefinition();
-		return definition.getShape(state, reader, pos, context);
+		return definition.getBoundingBox(worldIn, pos, blockState);
+	}
+
+
+	@Override
+	@SideOnly(Side.CLIENT)
+	public AxisAlignedBB getSelectedBoundingBox(IBlockState state, World worldIn, BlockPos pos) {
+		IMachineProperties definition = getDefinition();
+		return definition.getBoundingBox(worldIn, pos, state).offset(pos);
+	}
+
+	@Override
+	public RayTraceResult collisionRayTrace(IBlockState blockState, World worldIn, BlockPos pos, Vec3d start, Vec3d end) {
+		IMachineProperties definition = getDefinition();
+		return definition.collisionRayTrace(worldIn, pos, blockState, start, end);
+	}
+
+
+	/* TILE ENTITY CREATION */
+	@Override
+	public TileEntity createNewTileEntity(World world, int meta) {
+		return getDefinition().createTileEntity();
 	}
 
 	/* INTERACTION */
+
 	@Override
-	public ActionResultType onBlockActivated(BlockState state, World worldIn, BlockPos pos, PlayerEntity playerIn, Hand hand, BlockRayTraceResult hit) {
+	public boolean onBlockActivated(World worldIn, BlockPos pos, IBlockState state, EntityPlayer playerIn, EnumHand hand, EnumFacing facing, float hitX, float hitY, float hitZ) {
 		TileBase tile = TileUtil.getTile(worldIn, pos, TileBase.class);
-		if (tile == null) {
-			return ActionResultType.FAIL;
-		}
-		if (TileUtil.isUsableByPlayer(playerIn, tile)) {
+		if (tile != null) {
+			if (TileUtil.isUsableByPlayer(playerIn, tile)) {
 
-			if (!playerIn.isSneaking()) { //isSneaking
-				if (FluidUtil.interactWithFluidHandler(playerIn, hand, worldIn, pos, hit.getFace())) {
-					return ActionResultType.SUCCESS;
+				ItemStack heldItem = playerIn.getHeldItem(hand);
+				if (!playerIn.isSneaking()) {
+					if (FluidUtil.interactWithFluidHandler(playerIn, hand, worldIn, pos, facing)) {
+						return true;
+					}
 				}
-			}
 
-			if (!worldIn.isRemote) {
-				ServerPlayerEntity sPlayer = (ServerPlayerEntity) playerIn;    //TODO - hopefully safe because it's the server?
-				tile.openGui(sPlayer, pos);
+				if (!worldIn.isRemote) {
+					tile.openGui(playerIn, heldItem);
+				}
+				return true;
 			}
 		}
-		return ActionResultType.SUCCESS;
+		return false;
 	}
 
-	@Nullable
 	@Override
-	public BlockState getStateForPlacement(BlockItemUseContext context) {
-		return getDefaultState().with(FACING, context.getPlacementHorizontalFacing().getOpposite());
+	public void rotateAfterPlacement(EntityPlayer player, World world, BlockPos pos, EnumFacing side) {
+		IBlockState state = world.getBlockState(pos);
+
+		EnumFacing facing = getPlacementRotation(player, world, pos, side);
+		world.setBlockState(pos, state.withProperty(FACING, facing));
 	}
 
-	//TODO think this is the correct method
+	protected EnumFacing getPlacementRotation(EntityPlayer player, World world, BlockPos pos, EnumFacing side) {
+		int l = MathHelper.floor(player.rotationYaw * 4F / 360F + 0.5D) & 3;
+		if (l == 1) {
+			return EnumFacing.EAST;
+		}
+		if (l == 2) {
+			return EnumFacing.SOUTH;
+		}
+		if (l == 3) {
+			return EnumFacing.WEST;
+		}
+		return EnumFacing.NORTH;
+	}
+
 	@Override
-	public void onBlockHarvested(World world, BlockPos pos, BlockState state, PlayerEntity player) {
-		super.onBlockHarvested(world, pos, state, player);
+	public void breakBlock(World world, BlockPos pos, IBlockState state) {
+
 		if (world.isRemote) {
 			return;
 		}
@@ -187,70 +213,123 @@ public class BlockBase<P extends Enum<P> & IBlockType> extends BlockForestry imp
 		if (tile instanceof ISocketable) {
 			InventoryUtil.dropSockets((ISocketable) tile, tile.getWorld(), tile.getPos());
 		}
+		super.breakBlock(world, pos, state);
 	}
 
 	@Override
-	public void onBlockPlacedBy(World world, BlockPos pos, BlockState state, LivingEntity placer, ItemStack stack) {
+	public void onBlockPlacedBy(World world, BlockPos pos, IBlockState state, EntityLivingBase placer, ItemStack stack) {
 		if (world.isRemote) {
 			return;
 		}
 
-		if (placer instanceof PlayerEntity) {
+		if (placer instanceof EntityPlayer) {
 			TileUtil.actOnTile(world, pos, IOwnedTile.class, tile -> {
 				IOwnerHandler ownerHandler = tile.getOwnerHandler();
-				PlayerEntity player = (PlayerEntity) placer;
+				EntityPlayer player = (EntityPlayer) placer;
 				GameProfile gameProfile = player.getGameProfile();
 				ownerHandler.setOwner(gameProfile);
 			});
 		}
 	}
 
-	public void clientSetup() {
-		blockType.getMachineProperties().clientSetup();
+	public void init() {
+		blockType.getMachineProperties().registerTileEntity();
 	}
 
-	//TODO isFullCube, block methods
-	//	@Override
-	//	public boolean isFullCube(BlockState state) {
-	//		IMachineProperties definition = getDefinition();
-	//		return definition.isFullCube(state);
-	//	}
+	/* ITEM MODELS */
+	@SideOnly(Side.CLIENT)
+	@Override
+	public void registerModel(Item item, IModelManager manager) {
+		blockType.getMachineProperties().registerModel(item, manager);
+	}
+
+	/* STATES */
+	@Override
+	@SideOnly(Side.CLIENT)
+	public void registerStateMapper() {
+		ModelLoader.setCustomStateMapper(this, new MachineStateMapper<>(blockType));
+	}
 
 	@Override
-	public BlockState rotate(BlockState state, Rotation rot) {
-		Direction facing = state.get(FACING);
-		return state.with(FACING, rot.rotate(facing));
+	public boolean isFullCube(IBlockState state) {
+		IMachineProperties definition = getDefinition();
+		return definition.isFullCube(state);
+	}
+
+	@Override
+	protected BlockStateContainer createBlockState() {
+		return new BlockStateContainer(this, FACING);
+	}
+
+	@Override
+	public IBlockState getStateFromMeta(int meta) {
+		return this.getDefaultState().withProperty(FACING, EnumFacing.byIndex(meta));
+	}
+
+	@Override
+	public int getMetaFromState(IBlockState state) {
+		return state.getValue(FACING).getIndex();
+	}
+
+	@Override
+	public BlockStateContainer getBlockState() {
+		return this.blockState;
+	}
+
+	@Override
+	public IBlockState withMirror(IBlockState state, Mirror mirrorIn) {
+		return super.withMirror(state, mirrorIn);
+	}
+
+	@Override
+	public IBlockState withRotation(IBlockState state, Rotation rot) {
+		EnumFacing facing = state.getValue(FACING);
+		return state.withProperty(FACING, rot.rotate(facing));
+	}
+
+	@Override
+	public boolean getUseNeighborBrightness(IBlockState state) {
+		return hasTESR;
 	}
 
 	/* Particles */
-	@OnlyIn(Dist.CLIENT)
+	@SideOnly(Side.CLIENT)
 	@Override
-	public boolean addHitEffects(BlockState state, World world, RayTraceResult target, ParticleManager effectRenderer) {
+	public boolean addHitEffects(IBlockState state, World world, RayTraceResult target, ParticleManager effectRenderer) {
 		if (blockType.getMachineProperties() instanceof IMachinePropertiesTesr) {
-			if (target.getType() == RayTraceResult.Type.BLOCK) {
-				BlockRayTraceResult result = (BlockRayTraceResult) target;
-				return ParticleHelper.addBlockHitEffects(world, result.getPos(), result.getFace(), effectRenderer, particleCallback);
-			}
+			return ParticleHelper.addBlockHitEffects(world, target.getBlockPos(), target.sideHit, effectRenderer, particleCallback);
 		}
 		return false;
 	}
 
-	@OnlyIn(Dist.CLIENT)
+	@SideOnly(Side.CLIENT)
 	@Override
-	public boolean addDestroyEffects(BlockState state, World world, BlockPos pos, ParticleManager effectRenderer) {
-		/*if (blockType.getMachineProperties() instanceof IMachinePropertiesTesr) {
-			BlockState blockState = world.getBlockState(pos);
+	public boolean addDestroyEffects(World world, BlockPos pos, ParticleManager effectRenderer) {
+		if (blockType.getMachineProperties() instanceof IMachinePropertiesTesr) {
+			IBlockState blockState = world.getBlockState(pos);
 			return ParticleHelper.addDestroyEffects(world, this, blockState, pos, effectRenderer, particleCallback);
-		}*/
+		}
 		return false;
 	}
 
-	@OnlyIn(Dist.CLIENT)
 	@Override
-	public void registerSprites(ISpriteRegistry registry) {
+	public boolean addLandingEffects(IBlockState state, net.minecraft.world.WorldServer worldObj, BlockPos blockPosition, IBlockState iblockstate, EntityLivingBase entity, int numberOfParticles) {
+		return false;
+	}
+
+	@Override
+	public boolean addRunningEffects(IBlockState state, World world, BlockPos pos, Entity entity) {
+		return false;
+	}
+
+	@SideOnly(Side.CLIENT)
+	@Override
+	public void registerSprites(ITextureManager manager) {
 		IMachineProperties<?> machineProperties = blockType.getMachineProperties();
 		if (machineProperties instanceof IMachinePropertiesTesr) {
-			registry.addSprite(((IMachinePropertiesTesr) machineProperties).getParticleTexture());
+			TextureMap textureMapBlocks = Minecraft.getMinecraft().getTextureMapBlocks();
+			String particleTextureLocation = ((IMachinePropertiesTesr) machineProperties).getParticleTextureLocation();
+			textureMapBlocks.registerSprite(new ResourceLocation(particleTextureLocation));
 		}
 	}
 }
