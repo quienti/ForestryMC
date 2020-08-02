@@ -40,9 +40,7 @@ public interface IFarmable {
 	/**
 	 * @return true if the item is something that can drop from this type without actually being harvested as a crop. (Apples or sapling from decaying leaves.)
 	 */
-	default boolean isWindfall(ItemStack itemstack) {
-		return false;
-	}
+	boolean isWindfall(ItemStack itemstack);
 
 	/**
 	 * Plants a sapling by manipulating the world. The {@link IFarmLogic} should have verified the given location as valid. Called by the {@link IFarmHousing}

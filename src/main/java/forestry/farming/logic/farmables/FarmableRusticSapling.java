@@ -50,7 +50,7 @@ public class FarmableRusticSapling implements IFarmable {
 			return null;
 		}
 
-		return new CropDestroy(world, blockState, pos);
+		return new CropDestroy(world, blockState, pos, null);
 	}
 
 	@Override

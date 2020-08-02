@@ -71,6 +71,9 @@ public class ItemBackpack extends ItemWithGui implements IColoredItem {
 
 		this.definition = definition;
 		this.type = type;
+		/*addPropertyOverride(new ResourceLocation("mode"), (itemStack, world, livingEntity) -> {
+			return getMode(itemStack).ordinal();
+		});*/
 	}
 
 	public IBackpackDefinition getDefinition() {

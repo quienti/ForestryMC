@@ -10,7 +10,7 @@
  ******************************************************************************/
 package forestry.farming.logic;
 
-import net.minecraft.block.state.IBlockState;
+import net.minecraft.block.BlockState;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.NonNullList;
 import net.minecraft.util.math.BlockPos;
@@ -20,32 +20,12 @@ import forestry.api.farming.FarmDirection;
 import forestry.api.farming.IFarmHousing;
 import forestry.api.farming.IFarmProperties;
 import forestry.api.farming.IFarmable;
-import forestry.api.farming.ISoil;
+import forestry.api.farming.Soil;
 import forestry.core.utils.BlockUtil;
 
 public abstract class FarmLogicHomogeneous extends FarmLogicSoil {
 	public FarmLogicHomogeneous(IFarmProperties properties, boolean isManual) {
 		super(properties, isManual);
-	}
-
-	@Override
-	public boolean isAcceptedGermling(ItemStack itemstack) {
-		for (IFarmable germling : getFarmables()) {
-			if (germling.isGermling(itemstack)) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	@Override
-	public boolean isAcceptedWindfall(ItemStack itemstack) {
-		for (IFarmable germling : getFarmables()) {
-			if (germling.isWindfall(itemstack)) {
-				return true;
-			}
-		}
-		return false;
 	}
 
 	protected boolean trySetCrop(World world, IFarmHousing farmHousing, BlockPos position, FarmDirection direction) {
@@ -60,7 +40,7 @@ public abstract class FarmLogicHomogeneous extends FarmLogicSoil {
 
 	@Override
 	public boolean cultivate(World world, IFarmHousing farmHousing, BlockPos pos, FarmDirection direction, int extent) {
-		return maintainSoil(world, farmHousing, pos, direction, extent) || maintainGermlings(world, farmHousing, pos.up(), direction, extent);
+		return maintainSoil(world, farmHousing, pos, direction, extent) || maintainSeedlings(world, farmHousing, pos.up(), direction, extent);
 	}
 
 	private boolean maintainSoil(World world, IFarmHousing farmHousing, BlockPos pos, FarmDirection direction, int extent) {
@@ -68,7 +48,7 @@ public abstract class FarmLogicHomogeneous extends FarmLogicSoil {
 			return false;
 		}
 
-		for (ISoil soil : getSoils()) {
+		for (Soil soil : getSoils()) {
 			NonNullList<ItemStack> resources = NonNullList.create();
 			resources.add(soil.getResource());
 			if (!farmHousing.getFarmInventory().hasResources(resources)) {
@@ -77,7 +57,7 @@ public abstract class FarmLogicHomogeneous extends FarmLogicSoil {
 
 			for (int i = 0; i < extent; i++) {
 				BlockPos position = translateWithOffset(pos, direction, i);
-				IBlockState soilState = world.getBlockState(position);
+				BlockState soilState = world.getBlockState(position);
 
 				if (!world.isBlockLoaded(position) || farmHousing.isValidPlatform(world, pos)) {
 					break;
@@ -92,9 +72,7 @@ public abstract class FarmLogicHomogeneous extends FarmLogicSoil {
 					break;
 				}
 
-				for(ItemStack stack : BlockUtil.getBlockDrops(world, position)) {
-					farmHousing.addPendingProduce(stack);
-				}
+				BlockUtil.getBlockDrops(world, position).forEach(farmHousing::addPendingProduct);
 
 				BlockUtil.setBlockWithPlaceSound(world, position, soil.getSoilState());
 				farmHousing.getFarmInventory().removeResources(resources);
@@ -105,5 +83,5 @@ public abstract class FarmLogicHomogeneous extends FarmLogicSoil {
 		return false;
 	}
 
-	protected abstract boolean maintainGermlings(World world, IFarmHousing farmHousing, BlockPos pos, FarmDirection direction, int extent);
+	protected abstract boolean maintainSeedlings(World world, IFarmHousing farmHousing, BlockPos pos, FarmDirection direction, int extent);
 }

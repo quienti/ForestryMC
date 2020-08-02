@@ -10,74 +10,22 @@
  ******************************************************************************/
 package forestry.farming.logic.crops;
 
-import javax.annotation.Nullable;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.util.function.Consumer;
-
-import net.minecraft.block.state.IBlockState;
+import net.minecraft.block.Block;
+import net.minecraft.block.BlockState;
 import net.minecraft.item.ItemStack;
-import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.NonNullList;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 
-import net.minecraftforge.fml.relauncher.ReflectionHelper;
-
-import forestry.core.network.packets.PacketFXSignal;
-import forestry.core.utils.NetworkUtil;
+import forestry.core.utils.BlockUtil;
 
 public class CropBasicAgriCraft extends Crop {
 
-	@Nullable
-	private static Method growthStageMethod;
-	@Nullable
-	private static Method dropsMethod;
-	private static boolean searchedMethod = false;
-	private final IBlockState blockState;
+	private final BlockState blockState;
 
-	public CropBasicAgriCraft(World world, IBlockState blockState, BlockPos position) {
+	public CropBasicAgriCraft(World world, BlockState blockState, BlockPos position) {
 		super(world, position);
 		this.blockState = blockState;
-	}
-
-	private void replant(World world, BlockPos pos, TileEntity tileEntity) {
-		findMethods();
-		if (growthStageMethod != null) {
-			try {
-				growthStageMethod.invoke(tileEntity, 0);
-				PacketFXSignal packet = new PacketFXSignal(PacketFXSignal.VisualFXType.BLOCK_BREAK, PacketFXSignal.SoundFXType.BLOCK_BREAK, pos, blockState);
-				NetworkUtil.sendNetworkPacket(packet, pos, world);
-			} catch (InvocationTargetException | IllegalAccessException ignored) {
-			}
-		}
-	}
-
-	private void findMethods() {
-		if (!searchedMethod) {
-			Method growthStage = null;
-			Method drops = null;
-			try {
-				Class tileClass = Class.forName("com.infinityraider.agricraft.tiles.TileEntityCrop");
-				growthStage = ReflectionHelper.findMethod(tileClass, "setGrowthStage", null, int.class);
-				drops = ReflectionHelper.findMethod(tileClass, "getDrops", null, Consumer.class, boolean.class, boolean.class, boolean.class);
-
-			} catch (ReflectionHelper.UnableToFindMethodException | ClassNotFoundException e) {
-			}
-			growthStageMethod = growthStage;
-			dropsMethod = drops;
-			searchedMethod = true;
-		}
-	}
-
-	private void addDrops(World world, BlockPos pos, TileEntity tileEntity, Consumer<ItemStack> addToList) {
-		findMethods();
-		if (dropsMethod != null) {
-			try {
-				dropsMethod.invoke(tileEntity, addToList, false, false, true);
-			} catch (InvocationTargetException | IllegalAccessException ignored) {
-			}
-		}
 	}
 
 	@Override
@@ -87,14 +35,17 @@ public class CropBasicAgriCraft extends Crop {
 
 	@Override
 	protected NonNullList<ItemStack> harvestBlock(World world, BlockPos pos) {
+		Block block = blockState.getBlock();
 		NonNullList<ItemStack> harvest = NonNullList.create();
-		TileEntity tileEntity = world.getTileEntity(pos);
-		if (tileEntity == null) {
-			return harvest;
+		//		block.getDrops(harvest, world, pos, blockState, 0);
+		//TODO getDrops
+		if (harvest.size() > 1) {
+			harvest.remove(1); //AgriCraft returns cropsticks in 0, seeds in 1 in getDrops, removing since harvesting doesn't return them.
 		}
-		addDrops(world, pos, tileEntity, harvest::add);
+		harvest.remove(0);
 
-		replant(world, pos, tileEntity);
+		BlockState oldState = world.getBlockState(pos);
+		BlockUtil.setBlockWithBreakSound(world, pos, block.getDefaultState(), oldState);
 		return harvest;
 	}
 

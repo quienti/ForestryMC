@@ -13,25 +13,29 @@ package forestry.core.gui;
 import com.google.common.collect.ImmutableList;
 
 import javax.annotation.Nullable;
-import java.io.IOException;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 
-import net.minecraft.client.gui.GuiButton;
-import net.minecraft.client.renderer.RenderHelper;
-import net.minecraft.entity.player.EntityPlayer;
-import net.minecraft.inventory.Container;
-import net.minecraft.inventory.Slot;
+import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.inventory.container.Slot;
 import net.minecraft.item.ItemStack;
+import net.minecraft.util.text.ITextComponent;
+
+import com.mojang.blaze3d.matrix.MatrixStack;
+
+import genetics.api.alleles.IAlleleSpecies;
+import genetics.api.individual.IChromosomeType;
+import genetics.api.individual.IGenome;
+import genetics.api.individual.IIndividual;
+import genetics.api.mutation.IMutation;
+import genetics.api.mutation.IMutationContainer;
+import genetics.api.root.components.ComponentKeys;
 
 import forestry.api.apiculture.IApiaristTracker;
-import forestry.api.genetics.IAlleleSpecies;
 import forestry.api.genetics.IBreedingTracker;
-import forestry.api.genetics.IIndividual;
-import forestry.api.genetics.IMutation;
-import forestry.api.genetics.ISpeciesRoot;
+import forestry.api.genetics.IForestrySpeciesRoot;
 import forestry.core.config.Constants;
 import forestry.core.genetics.mutations.EnumMutateChance;
 import forestry.core.gui.buttons.GuiBetterButton;
@@ -41,52 +45,54 @@ import forestry.core.render.ColourProperties;
 import forestry.core.utils.NetworkUtil;
 import forestry.core.utils.Translator;
 
-public class GuiNaturalistInventory extends GuiForestry<Container> {
-	private final ISpeciesRoot speciesRoot;
+public class GuiNaturalistInventory extends GuiForestry<ContainerNaturalistInventory> {
+	private final IForestrySpeciesRoot<IIndividual> speciesRoot;
 	private final IBreedingTracker breedingTracker;
 	private final HashMap<String, ItemStack> iconStacks = new HashMap<>();
 	private final int pageCurrent, pageMax;
 	private final CycleTimer timer = new CycleTimer(0);
 
-	public GuiNaturalistInventory(ISpeciesRoot speciesRoot, EntityPlayer player, Container container, int page, int maxPages) {
-		super(Constants.TEXTURE_PATH_GUI + "/apiaristinventory.png", container);
+	public GuiNaturalistInventory(ContainerNaturalistInventory container, PlayerInventory playerInv, ITextComponent name) {
+		super(Constants.TEXTURE_PATH_GUI + "/apiaristinventory.png", container, playerInv, name);
 
-		this.speciesRoot = speciesRoot;
+		this.speciesRoot = container.tile.getSpeciesRoot();
 
-		this.pageCurrent = page;
-		this.pageMax = maxPages;
+		this.pageCurrent = container.getPage();
+		this.pageMax = container.getMaxPage();
 
 		xSize = 196;
 		ySize = 202;
 
 		for (IIndividual individual : speciesRoot.getIndividualTemplates()) {
-			iconStacks.put(individual.getIdent(), speciesRoot.getMemberStack(individual, speciesRoot.getIconType()));
+			iconStacks.put(individual.getIdentifier(), speciesRoot.getTypes().createStack(individual, speciesRoot.getIconType()));
 		}
 
-		breedingTracker = speciesRoot.getBreedingTracker(player.world, player.getGameProfile());
+		breedingTracker = speciesRoot.getBreedingTracker(playerInv.player.world, playerInv.player.getGameProfile());
 	}
 
 	@Override
-	protected void drawGuiContainerBackgroundLayer(float f, int i, int j) {
-		super.drawGuiContainerBackgroundLayer(f, i, j);
+	protected void drawGuiContainerBackgroundLayer(MatrixStack transform, float partialTicks, int j, int i) {
+		super.drawGuiContainerBackgroundLayer(transform, partialTicks, j, i);
 		timer.onDraw();
 		String header = Translator.translateToLocal("for.gui.page") + " " + (pageCurrent + 1) + "/" + pageMax;
-		fontRenderer.drawString(header, guiLeft + 95 + textLayout.getCenteredOffset(header, 98), guiTop + 10, ColourProperties.INSTANCE.get("gui.title"));
+		getFontRenderer().drawString(transform, header, guiLeft + 95 + textLayout.getCenteredOffset(header, 98), guiTop + 10, ColourProperties.INSTANCE.get("gui.title"));
 
 		IIndividual individual = getIndividualAtPosition(i, j);
 		if (individual == null) {
-			displayBreedingStatistics(10);
+			displayBreedingStatistics(transform, 10);
 		}
 
 		if (individual != null) {
-			RenderHelper.enableGUIStandardItemLighting();
+			//RenderHelper.enableGUIStandardItemLighting(); TODO Gui Light
 			textLayout.startPage();
-			boolean pureBred = individual.isPureBred(individual.getGenome().getSpeciesRoot().getSpeciesChromosomeType());
 
-			displaySpeciesInformation(true, individual.getGenome().getPrimary(), iconStacks.get(individual.getIdent()), 10, pureBred ? 25 : 10);
+			IGenome genome = individual.getGenome();
+			IChromosomeType speciesType = individual.getRoot().getKaryotype().getSpeciesType();
+			boolean pureBred = individual.isPureBred(speciesType);
+
+			displaySpeciesInformation(transform, true, genome.getPrimary(), iconStacks.get(individual.getIdentifier()), 10, pureBred ? 25 : 10);
 			if (!pureBred) {
-				textLayout.line = 66;
-				displaySpeciesInformation(individual.isAnalyzed(), individual.getGenome().getSecondary(), iconStacks.get(individual.getGenome().getSecondary().getUID()), 10, 10);
+				displaySpeciesInformation(transform, individual.isAnalyzed(), genome.getSecondary(), iconStacks.get(genome.getSecondary().getRegistryName().toString()), 10, 10);
 			}
 
 			textLayout.endPage();
@@ -94,26 +100,23 @@ public class GuiNaturalistInventory extends GuiForestry<Container> {
 	}
 
 	@Override
-	public void initGui() {
-		super.initGui();
+	public void init() {
+		super.init();
 
-		buttonList.add(new GuiBetterButton(1, guiLeft + 99, guiTop + 7, StandardButtonTextureSets.LEFT_BUTTON_SMALL));
-		buttonList.add(new GuiBetterButton(2, guiLeft + 180, guiTop + 7, StandardButtonTextureSets.RIGHT_BUTTON_SMALL));
+		buttons.add(new GuiBetterButton(guiLeft + 99, guiTop + 7, StandardButtonTextureSets.LEFT_BUTTON_SMALL, b -> {
+			if (pageCurrent > 0) {
+				flipPage(pageCurrent - 1);
+			}
+		}));
+		buttons.add(new GuiBetterButton(guiLeft + 180, guiTop + 7, StandardButtonTextureSets.RIGHT_BUTTON_SMALL, b -> {
+			if (pageCurrent < pageMax - 1) {
+				flipPage(pageCurrent + 1);
+			}
+		}));
 	}
 
 	private static void flipPage(int page) {
 		NetworkUtil.sendToServer(new PacketGuiSelectRequest(page, 0));
-	}
-
-	@Override
-	protected void actionPerformed(GuiButton guibutton) throws IOException {
-		super.actionPerformed(guibutton);
-
-		if (guibutton.id == 1 && pageCurrent > 0) {
-			flipPage(pageCurrent - 1);
-		} else if (guibutton.id == 2 && pageCurrent < pageMax - 1) {
-			flipPage(pageCurrent + 1);
-		}
 	}
 
 	@Nullable
@@ -127,7 +130,7 @@ public class GuiNaturalistInventory extends GuiForestry<Container> {
 			return null;
 		}
 
-		if (!slot.getStack().hasTagCompound()) {
+		if (!slot.getStack().hasTag()) {
 			return null;
 		}
 
@@ -135,40 +138,40 @@ public class GuiNaturalistInventory extends GuiForestry<Container> {
 			return null;
 		}
 
-		return speciesRoot.getMember(slot.getStack());
+		return speciesRoot.getTypes().createIndividual(slot.getStack()).orElse(null);
 	}
 
-	private void displayBreedingStatistics(int x) {
+	private void displayBreedingStatistics(MatrixStack transform, int x) {
 
 		textLayout.startPage();
 
-		textLayout.drawLine(Translator.translateToLocal("for.gui.speciescount") + ": " + breedingTracker.getSpeciesBred() + "/" + speciesRoot.getSpeciesCount(), x);
+		textLayout.drawLine(transform, Translator.translateToLocal("for.gui.speciescount") + ": " + breedingTracker.getSpeciesBred() + "/" + speciesRoot.getSpeciesCount(), x);
 		textLayout.newLine();
 		textLayout.newLine();
 
 		if (breedingTracker instanceof IApiaristTracker) {
 			IApiaristTracker tracker = (IApiaristTracker) breedingTracker;
-			textLayout.drawLine(Translator.translateToLocal("for.gui.queens") + ": " + tracker.getQueenCount(), x);
+			textLayout.drawLine(transform, Translator.translateToLocal("for.gui.queens") + ": " + tracker.getQueenCount(), x);
 			textLayout.newLine();
 
-			textLayout.drawLine(Translator.translateToLocal("for.gui.princesses") + ": " + tracker.getPrincessCount(), x);
+			textLayout.drawLine(transform, Translator.translateToLocal("for.gui.princesses") + ": " + tracker.getPrincessCount(), x);
 			textLayout.newLine();
 
-			textLayout.drawLine(Translator.translateToLocal("for.gui.drones") + ": " + tracker.getDroneCount(), x);
+			textLayout.drawLine(transform, Translator.translateToLocal("for.gui.drones") + ": " + tracker.getDroneCount(), x);
 			textLayout.newLine();
 		}
 
 		textLayout.endPage();
 	}
 
-	private void displaySpeciesInformation(boolean analyzed, IAlleleSpecies species, ItemStack iconStack, int x, int maxMutationCount) {
+	private void displaySpeciesInformation(MatrixStack transform, boolean analyzed, IAlleleSpecies species, ItemStack iconStack, int x, int maxMutationCount) {
 
 		if (!analyzed) {
-			textLayout.drawLine(Translator.translateToLocal("for.gui.unknown"), x);
+			textLayout.drawLine(transform, Translator.translateToLocal("for.gui.unknown"), x);
 			return;
 		}
 
-		textLayout.drawLine(species.getAlleleName(), x);
+		textLayout.drawLine(transform, species.getDisplayName().getString(), x);
 		GuiUtil.drawItemStack(this, iconStack, guiLeft + x + 69, guiTop + textLayout.getLineY() - 2);
 
 		textLayout.newLine();
@@ -177,12 +180,17 @@ public class GuiNaturalistInventory extends GuiForestry<Container> {
 		int columnWidth = 16;
 		int column = 10;
 
-		List<List<? extends IMutation>> mutations = splitMutations(speciesRoot.getCombinations(species), maxMutationCount);
+		IMutationContainer<IIndividual, ? extends IMutation> container = speciesRoot.getComponent(ComponentKeys.MUTATIONS);
+		List<List<? extends IMutation>> mutations = splitMutations(container.getCombinations(species), maxMutationCount);
 		for (IMutation combination : timer.getCycledItem(mutations, Collections::emptyList)) {
+			if (combination.isSecret()) {
+				continue;
+			}
+
 			if (breedingTracker.isDiscovered(combination)) {
-				drawMutationIcon(combination, species, column);
+				drawMutationIcon(transform, combination, species, column);
 			} else {
-				drawUnknownIcon(combination, column);
+				drawUnknownIcon(transform, combination, column);
 			}
 
 			column += columnWidth;
@@ -191,10 +199,13 @@ public class GuiNaturalistInventory extends GuiForestry<Container> {
 				textLayout.newLine(18);
 			}
 		}
+
+		textLayout.newLine();
+		textLayout.newLine();
 	}
 
-	private void drawMutationIcon(IMutation combination, IAlleleSpecies species, int x) {
-		GuiUtil.drawItemStack(this, iconStacks.get(combination.getPartner(species).getUID()), guiLeft + x, guiTop + textLayout.getLineY());
+	private void drawMutationIcon(MatrixStack transform, IMutation combination, IAlleleSpecies species, int x) {
+		GuiUtil.drawItemStack(this, iconStacks.get(combination.getPartner(species).getRegistryName().toString()), guiLeft + x, guiTop + textLayout.getLineY());
 
 		int line = 48;
 		int column;
@@ -220,12 +231,11 @@ public class GuiNaturalistInventory extends GuiForestry<Container> {
 		}
 
 		bindTexture(textureFile);
-		drawTexturedModalRect(guiLeft + x, guiTop + textLayout.getLineY(), column, line, 16, 16);
+		blit(transform, guiLeft + x, guiTop + textLayout.getLineY(), column, line, 16, 16);
 
 	}
 
-	private void drawUnknownIcon(IMutation mutation, int x) {
-
+	private void drawUnknownIcon(MatrixStack transform, IMutation mutation, int x) {
 		float chance = mutation.getBaseChance();
 
 		int line;
@@ -251,7 +261,7 @@ public class GuiNaturalistInventory extends GuiForestry<Container> {
 		}
 
 		bindTexture(textureFile);
-		drawTexturedModalRect(guiLeft + x, guiTop + textLayout.getLineY(), column, line, 16, 16);
+		blit(transform, guiLeft + x, guiTop + textLayout.getLineY(), column, line, 16, 16);
 	}
 
 	private static List<List<? extends IMutation>> splitMutations(List<? extends IMutation> mutations, int maxMutationCount) {

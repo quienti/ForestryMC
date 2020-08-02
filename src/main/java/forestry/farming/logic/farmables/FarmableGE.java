@@ -10,69 +10,68 @@
  ******************************************************************************/
 package forestry.farming.logic.farmables;
 
-import com.google.common.collect.Sets;
-
 import javax.annotation.Nullable;
 import java.util.Collection;
-import java.util.Collections;
+import java.util.HashSet;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import net.minecraft.block.Block;
-import net.minecraft.block.state.IBlockState;
-import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.block.BlockState;
+import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 
-import forestry.api.arboriculture.ITree;
-import forestry.api.arboriculture.ITreeRoot;
 import forestry.api.arboriculture.TreeManager;
+import forestry.api.arboriculture.genetics.ITree;
+import forestry.api.arboriculture.genetics.ITreeRoot;
 import forestry.api.farming.ICrop;
 import forestry.api.farming.IFarmable;
-import forestry.api.genetics.AlleleManager;
-import forestry.arboriculture.ModuleArboriculture;
-import forestry.core.utils.datastructures.ItemStackMap;
+import forestry.api.genetics.alleles.AlleleManager;
+import forestry.api.genetics.products.Product;
+import forestry.arboriculture.features.ArboricultureBlocks;
 import forestry.farming.logic.crops.CropDestroy;
 
 public class FarmableGE implements IFarmable {
 
-	//StackMap used because a normal HashSet didn't seem to work
-	//TODO use items instead and normal set if this is still used in 1.14+ since items are flattened
-	private final Set<ItemStack> windfall = Collections.newSetFromMap(new ItemStackMap<>());
+	private final Set<Item> windfall = new HashSet<>();
 
 	//TODO would be nice to make this class more granular so windfall and germling checks could be more specific
 	public FarmableGE() {
-		windfall.addAll(AlleleManager.alleleRegistry.getRegisteredFruitFamilies().values().stream()
-				.map(TreeManager.treeRoot::getFruitProvidersForFruitFamily)
-				.flatMap(Collection::stream)
-				.map(p -> Sets.union(p.getProducts().keySet(), p.getSpecialty().keySet()))
-				.flatMap(Collection::stream)
-				.collect(Collectors.toSet()));
+		windfall.addAll(AlleleManager.geneticRegistry.getRegisteredFruitFamilies().values().stream()
+			.map(TreeManager.treeRoot::getFruitProvidersForFruitFamily)
+			.flatMap(Collection::stream)
+			.flatMap(p -> Stream.concat(p.getProducts().getPossibleProducts().stream(), p.getSpecialty().getPossibleProducts().stream()))
+			.map(Product::getItem)
+			.collect(Collectors.toSet()));
 	}
 
 	@Override
-	public boolean isSaplingAt(World world, BlockPos pos, IBlockState blockState) {
-		return ModuleArboriculture.getBlocks().saplingGE == blockState.getBlock();
+	public boolean isSaplingAt(World world, BlockPos pos, BlockState blockState) {
+		return ArboricultureBlocks.SAPLING_GE.blockEqual(blockState);
 	}
 
 	@Override
 	@Nullable
-	public ICrop getCropAt(World world, BlockPos pos, IBlockState blockState) {
+	public ICrop getCropAt(World world, BlockPos pos, BlockState blockState) {
 		Block block = blockState.getBlock();
 
-		if (!block.isWood(world, pos)) {
+		if (!block.isIn(BlockTags.LOGS)) {
 			return null;
 		}
 
-		return new CropDestroy(world, blockState, pos);
+		return new CropDestroy(world, blockState, pos, null);
 	}
 
 	@Override
-	public boolean plantSaplingAt(EntityPlayer player, ItemStack germling, World world, BlockPos pos) {
+	public boolean plantSaplingAt(PlayerEntity player, ItemStack germling, World world, BlockPos pos) {
 		ITreeRoot treeRoot = TreeManager.treeRoot;
 
-		ITree tree = treeRoot.getMember(germling);
+		ITree tree = treeRoot.create(germling).orElse(null);
 		return tree != null && treeRoot.plantSapling(world, tree, player.getGameProfile(), pos);
 	}
 
@@ -83,7 +82,7 @@ public class FarmableGE implements IFarmable {
 
 	@Override
 	public boolean isWindfall(ItemStack itemstack) {
-		return windfall.contains(itemstack);
+		return windfall.contains(itemstack.getItem());
 	}
 
 }

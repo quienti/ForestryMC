@@ -3,7 +3,7 @@ package forestry.core.gui;
 import java.util.List;
 import java.util.function.Supplier;
 
-import net.minecraft.client.gui.GuiScreen;
+import net.minecraft.client.gui.screen.Screen;
 
 public class CycleTimer {
 	private long startTime;
@@ -26,7 +26,7 @@ public class CycleTimer {
 	}
 
 	public void onDraw() {
-		if (!GuiScreen.isShiftKeyDown()) {
+		if (!Screen.hasShiftDown()) {
 			if (this.pausedDuration > 0L) {
 				this.startTime += this.pausedDuration;
 				this.pausedDuration = 0L;
@@ -39,4 +39,3 @@ public class CycleTimer {
 
 	}
 }
-

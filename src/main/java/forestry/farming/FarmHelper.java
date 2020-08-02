@@ -21,8 +21,8 @@ import java.util.List;
 import java.util.Map;
 
 import net.minecraft.block.Block;
-import net.minecraft.init.Blocks;
-import net.minecraft.util.EnumFacing;
+import net.minecraft.block.Blocks;
+import net.minecraft.util.Direction;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 
@@ -31,7 +31,7 @@ import forestry.api.farming.ICrop;
 import forestry.api.farming.IFarmHousing;
 import forestry.api.farming.IFarmListener;
 import forestry.api.farming.IFarmLogic;
-import forestry.core.utils.TopDownBlockPosComparator;
+import forestry.core.utils.VectUtil;
 
 public class FarmHelper {
 
@@ -54,7 +54,7 @@ public class FarmHelper {
 		public boolean hasLiquid = true;
 	}
 
-	private static FarmDirection getLayoutDirection(FarmDirection farmSide) {
+	public static FarmDirection getLayoutDirection(FarmDirection farmSide) {
 		switch (farmSide) {
 			case NORTH:
 				return FarmDirection.WEST;
@@ -83,16 +83,16 @@ public class FarmHelper {
 	}
 
 	public static final ImmutableSet<Block> bricks = ImmutableSet.of(
-		Blocks.BRICK_BLOCK,
-		Blocks.STONEBRICK,
+		Blocks.BRICKS,
+		Blocks.STONE_BRICKS,
 		Blocks.SANDSTONE,
-		Blocks.NETHER_BRICK,
+		Blocks.NETHER_BRICKS,
 		Blocks.QUARTZ_BLOCK
 	);
 
 	private static FarmDirection getOpposite(FarmDirection farmDirection) {
-		EnumFacing forgeDirection = farmDirection.getFacing();
-		EnumFacing forgeDirectionOpposite = forgeDirection.getOpposite();
+		Direction forgeDirection = farmDirection.getFacing();
+		Direction forgeDirectionOpposite = forgeDirection.getOpposite();
 		return FarmDirection.getFarmDirection(forgeDirectionOpposite);
 	}
 
@@ -228,7 +228,7 @@ public class FarmHelper {
 
 	public static Collection<ICrop> harvestTarget(World world, IFarmHousing housing, FarmTarget target, IFarmLogic logic, Iterable<IFarmListener> farmListeners) {
 		BlockPos pos = target.getStart().add(0, target.getYOffset(), 0);
-		Collection<ICrop> harvested = logic.harvest(world, housing, pos, target.getDirection(), target.getExtent());
+		Collection<ICrop> harvested = logic.harvest(world, housing, target.getDirection(), target.getExtent(), pos);
 		if (!harvested.isEmpty()) {
 			// Let event handlers know.
 			for (IFarmListener listener : farmListeners) {
@@ -247,7 +247,7 @@ public class FarmHelper {
 
 		@Override
 		public int compare(ICrop o1, ICrop o2) {
-			return TopDownBlockPosComparator.INSTANCE.compare(o1.getPosition(), o2.getPosition());
+			return VectUtil.TOP_DOWN_COMPARATOR.compare(o1.getPosition(), o2.getPosition());
 		}
 	}
 }

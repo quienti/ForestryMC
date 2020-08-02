@@ -10,9 +10,7 @@
  ******************************************************************************/
 package forestry.farming.logic;
 
-import net.minecraft.block.state.IBlockState;
-import net.minecraft.init.Items;
-import net.minecraft.item.ItemStack;
+import net.minecraft.block.BlockState;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 
@@ -29,41 +27,6 @@ public class FarmLogicGourd extends FarmLogicWatered {
 	}
 
 	@Override
-	public ItemStack getIconItemStack() {
-		return new ItemStack(Items.MELON);
-	}
-
-	@Override
-	public String getUnlocalizedName() {
-		return "for.farm.gourd";
-	}
-
-	@Override
-	public int getFertilizerConsumption() {
-		return 10;
-	}
-
-	@Override
-	public int getWaterConsumption(float hydrationModifier) {
-		return (int) (40 * hydrationModifier);
-	}
-
-	@Override
-	public boolean isAcceptedGermling(ItemStack itemstack) {
-		for (IFarmable germling : getFarmables()) {
-			if (germling.isGermling(itemstack)) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	@Override
-	public boolean isAcceptedWindfall(ItemStack stack) {
-		return false;
-	}
-
-	@Override
 	protected boolean maintainCrops(World world, IFarmHousing farmHousing, BlockPos pos, FarmDirection direction, int extent) {
 		for (int i = 0; i < extent; i++) {
 			BlockPos position = translateWithOffset(pos, direction, i);
@@ -71,13 +34,13 @@ public class FarmLogicGourd extends FarmLogicWatered {
 				break;
 			}
 
-			IBlockState state = world.getBlockState(position);
+			BlockState state = world.getBlockState(position);
 			if (!world.isAirBlock(position) && !BlockUtil.isReplaceableBlock(state, world, position)
 				|| !isValidPosition(farmHousing, direction, position, CultivationType.CROP)) {
 				continue;
 			}
 
-			IBlockState groundState = world.getBlockState(position.down());
+			BlockState groundState = world.getBlockState(position.down());
 			if (isAcceptedSoil(groundState)) {
 				return trySetCrop(world, farmHousing, position, direction);
 			}

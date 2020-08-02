@@ -53,7 +53,7 @@ public class FarmableStacked implements IFarmable {
 			return null;
 		}
 
-		return new CropDestroy(world, blockState, cropPos);
+		return new CropDestroy(world, blockState, cropPos, null);
 	}
 
 	@Override

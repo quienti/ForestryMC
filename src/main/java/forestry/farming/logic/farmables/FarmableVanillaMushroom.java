@@ -36,7 +36,7 @@ public class FarmableVanillaMushroom extends FarmableBase {
 			return null;
 		}
 
-		return new CropDestroy(world, blockState, pos);
+		return new CropDestroy(world, blockState, pos, null);
 	}
 
 	@Override

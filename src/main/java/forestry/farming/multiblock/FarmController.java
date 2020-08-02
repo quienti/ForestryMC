@@ -12,34 +12,24 @@ package forestry.farming.multiblock;
 
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Preconditions;
-import com.google.common.collect.HashBasedTable;
-import com.google.common.collect.Table;
 
 import javax.annotation.Nullable;
 import java.io.IOException;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
 import java.util.EnumMap;
 import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.Stack;
 
-import net.minecraft.block.state.IBlockState;
-import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.block.BlockState;
+import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
-import net.minecraft.nbt.NBTTagCompound;
-import net.minecraft.util.NonNullList;
+import net.minecraft.nbt.CompoundNBT;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3i;
+import net.minecraft.util.math.vector.Vector3i;
 import net.minecraft.world.World;
 
-import net.minecraftforge.fluids.FluidRegistry;
 import net.minecraftforge.fluids.FluidStack;
+import net.minecraftforge.fluids.capability.IFluidHandler;
 
 import forestry.api.circuits.ChipsetManager;
 import forestry.api.circuits.CircuitSocketType;
@@ -47,20 +37,13 @@ import forestry.api.circuits.ICircuitBoard;
 import forestry.api.circuits.ICircuitSocketType;
 import forestry.api.core.EnumHumidity;
 import forestry.api.core.EnumTemperature;
-import forestry.api.core.IErrorLogic;
 import forestry.api.farming.FarmDirection;
-import forestry.api.farming.ICrop;
-import forestry.api.farming.IFarmInventory;
-import forestry.api.farming.IFarmListener;
 import forestry.api.farming.IFarmLogic;
 import forestry.api.farming.IFarmable;
 import forestry.api.multiblock.IFarmComponent;
 import forestry.api.multiblock.IMultiblockComponent;
 import forestry.core.config.Config;
-import forestry.core.config.Constants;
 import forestry.core.errors.EnumErrorCode;
-import forestry.core.fluids.FilteredTank;
-import forestry.core.fluids.StandardTank;
 import forestry.core.fluids.TankManager;
 import forestry.core.inventory.FakeInventoryAdapter;
 import forestry.core.inventory.IInventoryAdapter;
@@ -72,72 +55,48 @@ import forestry.core.network.PacketBufferForestry;
 import forestry.core.tiles.ILiquidTankTile;
 import forestry.core.utils.PlayerUtil;
 import forestry.core.utils.Translator;
+import forestry.farming.FarmDefinition;
 import forestry.farming.FarmHelper;
-import forestry.farming.FarmHelper.FarmWorkStatus;
-import forestry.farming.FarmHelper.Stage;
-import forestry.farming.FarmRegistry;
+import forestry.farming.FarmManager;
 import forestry.farming.FarmTarget;
 import forestry.farming.gui.IFarmLedgerDelegate;
-import forestry.farming.logic.ForestryFarmIdentifier;
 import forestry.farming.tiles.TileFarmGearbox;
 import forestry.farming.tiles.TileFarmPlain;
 
 public class FarmController extends RectangularMultiblockControllerBase implements IFarmControllerInternal, ILiquidTankTile {
-
-	private final Map<FarmDirection, List<FarmTarget>> targets = new EnumMap<>(FarmDirection.class);
-	private final Table<FarmDirection, BlockPos, Integer> lastExtents = HashBasedTable.create();
 	private int allowedExtent = 0;
-	@Nullable
-	private IFarmLogic harvestProvider; // The farm logic which supplied the pending crops.
-	private final List<ICrop> pendingCrops = new LinkedList<>();
-	private final Stack<ItemStack> pendingProduce = new Stack<>();
-
-	private Stage stage = Stage.CULTIVATE;
 
 	// active components are stored with a tick offset so they do not all tick together
 	private final Map<IFarmComponent.Active, Integer> farmActiveComponents = new HashMap<>();
-	private final Set<IFarmListener> farmListeners = new HashSet<>();
 
 	private final Map<FarmDirection, IFarmLogic> farmLogics = new EnumMap<>(FarmDirection.class);
 
 	private final InventoryAdapter sockets;
 	private final InventoryFarm inventory;
-	private final TankManager tankManager;
-	private final StandardTank resourceTank;
-	private final FarmHydrationManager hydrationManager;
-	private final FarmFertilizerManager fertilizerManager;
+	private final FarmManager manager;
 
 	// the number of work ticks that this farm has had no power
 	private int noPowerTime = 0;
 
-	// tick updates can come from multiple gearboxes so keep track of them here
-	private int farmWorkTicks = 0;
-
 	@Nullable
-	private Vec3i offset;
+	private Vector3i offset;
 	@Nullable
-	private Vec3i area;
+	private Vector3i area;
 
 	public FarmController(World world) {
 		super(world, FarmMultiblockSizeLimits.instance);
 
-		this.resourceTank = new FilteredTank(Constants.PROCESSOR_TANK_CAPACITY).setFilters(FluidRegistry.WATER);
-
-		this.tankManager = new TankManager(this, resourceTank);
-
 		this.inventory = new InventoryFarm(this);
+		this.manager = new FarmManager(this);
 		this.sockets = new InventoryAdapter(1, "sockets");
-		this.hydrationManager = new FarmHydrationManager(this);
-		this.fertilizerManager = new FarmFertilizerManager();
 
 		refreshFarmLogics();
 	}
 
 	@Override
 	public IFarmLedgerDelegate getFarmLedgerDelegate() {
-		return hydrationManager;
+		return manager.getHydrationManager();
 	}
-
 
 	@Override
 	public IInventoryAdapter getInternalInventory() {
@@ -148,22 +107,21 @@ public class FarmController extends RectangularMultiblockControllerBase implemen
 		}
 	}
 
-
 	@Override
 	public TankManager getTankManager() {
-		return tankManager;
+		return manager.getTankManager();
 	}
 
 	@Override
-	public void onAttachedPartWithMultiblockData(IMultiblockComponent part, NBTTagCompound data) {
-		this.readFromNBT(data);
+	public void onAttachedPartWithMultiblockData(IMultiblockComponent part, CompoundNBT data) {
+		this.read(data);
 	}
 
 	@Override
 	protected void onBlockAdded(IMultiblockComponent newPart) {
 		if (newPart instanceof IFarmComponent.Listener) {
 			IFarmComponent.Listener listenerPart = (IFarmComponent.Listener) newPart;
-			farmListeners.add(listenerPart.getFarmListener());
+			manager.addListener(listenerPart.getFarmListener());
 		}
 
 		if (newPart instanceof IFarmComponent.Active) {
@@ -175,7 +133,7 @@ public class FarmController extends RectangularMultiblockControllerBase implemen
 	protected void onBlockRemoved(IMultiblockComponent oldPart) {
 		if (oldPart instanceof IFarmComponent.Listener) {
 			IFarmComponent.Listener listenerPart = (IFarmComponent.Listener) oldPart;
-			farmListeners.remove(listenerPart.getFarmListener());
+			manager.removeListener(listenerPart.getFarmListener());
 		}
 
 		if (oldPart instanceof IFarmComponent.Active) {
@@ -203,7 +161,7 @@ public class FarmController extends RectangularMultiblockControllerBase implemen
 	@Override
 	protected void onMachineDisassembled() {
 		super.onMachineDisassembled();
-		targets.clear();
+		manager.clearTargets();
 	}
 
 	@Override
@@ -232,10 +190,10 @@ public class FarmController extends RectangularMultiblockControllerBase implemen
 
 	@Override
 	protected boolean updateServer(int tickCount) {
-		hydrationManager.updateServer(world, getTopCenterCoord());
+		manager.getHydrationManager().updateServer();
 
 		if (updateOnInterval(20)) {
-			inventory.drainCan(tankManager);
+			inventory.drainCan(manager.getTankManager());
 		}
 
 		boolean hasPower = false;
@@ -274,42 +232,34 @@ public class FarmController extends RectangularMultiblockControllerBase implemen
 	}
 
 	@Override
-	public NBTTagCompound writeToNBT(NBTTagCompound data) {
-		data = super.writeToNBT(data);
-		sockets.writeToNBT(data);
-		hydrationManager.writeToNBT(data);
-		tankManager.writeToNBT(data);
-		fertilizerManager.writeToNBT(data);
-		inventory.writeToNBT(data);
+	public CompoundNBT write(CompoundNBT data) {
+		data = super.write(data);
+		sockets.write(data);
+		manager.write(data);
+		inventory.write(data);
 		return data;
 	}
 
 	@Override
-	public void readFromNBT(NBTTagCompound data) {
-		super.readFromNBT(data);
-		sockets.readFromNBT(data);
-		hydrationManager.readFromNBT(data);
-		tankManager.readFromNBT(data);
-		fertilizerManager.readFromNBT(data);
-		inventory.readFromNBT(data);
+	public void read(CompoundNBT data) {
+		super.read(data);
+		sockets.read(data);
+		manager.read(data);
+		inventory.read(data);
 
 		refreshFarmLogics();
 	}
 
 	@Override
-	public void formatDescriptionPacket(NBTTagCompound data) {
-		sockets.writeToNBT(data);
-		hydrationManager.writeToNBT(data);
-		tankManager.writeToNBT(data);
-		fertilizerManager.writeToNBT(data);
+	public void formatDescriptionPacket(CompoundNBT data) {
+		sockets.write(data);
+		manager.write(data);
 	}
 
 	@Override
-	public void decodeDescriptionPacket(NBTTagCompound data) {
-		sockets.readFromNBT(data);
-		hydrationManager.readFromNBT(data);
-		tankManager.readFromNBT(data);
-		fertilizerManager.readFromNBT(data);
+	public void decodeDescriptionPacket(CompoundNBT data) {
+		sockets.read(data);
+		manager.read(data);
 
 		refreshFarmLogics();
 	}
@@ -320,18 +270,19 @@ public class FarmController extends RectangularMultiblockControllerBase implemen
 	}
 
 	@Override
+	public BlockPos getTopCoord() {
+		return getTopCenterCoord();
+	}
+
+	@Override
 	public void writeGuiData(PacketBufferForestry data) {
-		tankManager.writeData(data);
-		hydrationManager.writeData(data);
-		fertilizerManager.writeData(data);
+		manager.writeData(data);
 		sockets.writeData(data);
 	}
 
 	@Override
 	public void readGuiData(PacketBufferForestry data) throws IOException {
-		tankManager.readData(data);
-		hydrationManager.readData(data);
-		fertilizerManager.readData(data);
+		manager.readData(data);
 		sockets.readData(data);
 
 		refreshFarmLogics();
@@ -372,7 +323,7 @@ public class FarmController extends RectangularMultiblockControllerBase implemen
 	@Override
 	public float getExactHumidity() {
 		BlockPos coords = getReferenceCoord();
-		return world.getBiome(coords).getRainfall();
+		return world.getBiome(coords).getDownfall();
 	}
 
 	@Override
@@ -381,30 +332,20 @@ public class FarmController extends RectangularMultiblockControllerBase implemen
 	}
 
 	@Override
-	public Vec3i getOffset() {
+	public Vector3i getOffset() {
 		if (offset == null) {
-			Vec3i area = getArea();
-			offset = new Vec3i(-area.getX() / 2, -2, -area.getZ() / 2);
+			Vector3i area = getArea();
+			offset = new Vector3i(-area.getX() / 2, -2, -area.getZ() / 2);
 		}
 		return offset;
 	}
 
 	@Override
-	public Vec3i getArea() {
+	public Vector3i getArea() {
 		if (area == null) {
-			area = new Vec3i(7 + allowedExtent * 2, 13, 7 + allowedExtent * 2);
+			area = new Vector3i(7 + allowedExtent * 2, 13, 7 + allowedExtent * 2);
 		}
 		return area;
-	}
-
-	@Override
-	public BlockPos getFarmCorner(FarmDirection direction) {
-		List<FarmTarget> targetList = this.targets.get(direction);
-		if (targetList.isEmpty()) {
-			return getCoords();
-		}
-		FarmTarget target = targetList.get(0);
-		return target.getStart().offset(direction.getFacing().getOpposite());
 	}
 
 	@Override
@@ -414,92 +355,11 @@ public class FarmController extends RectangularMultiblockControllerBase implemen
 
 	@Override
 	public boolean doWork() {
-		farmWorkTicks++;
-		if (targets.isEmpty() || farmWorkTicks % 20 == 0) {
-			setUpFarmlandTargets();
-		}
-
-		IErrorLogic errorLogic = getErrorLogic();
-
-		if (!pendingProduce.isEmpty()) {
-			boolean added = inventory.tryAddPendingProduce(pendingProduce);
-			errorLogic.setCondition(!added, EnumErrorCode.NO_SPACE_INVENTORY);
-			return added;
-		}
-
-		boolean hasFertilizer = fertilizerManager.maintainFertilizer(inventory);
-		if (errorLogic.setCondition(!hasFertilizer, EnumErrorCode.NO_FERTILIZER)) {
-			return false;
-		}
-
-		// Cull queued crops.
-		if (!pendingCrops.isEmpty() && harvestProvider != null) {
-			ICrop first = pendingCrops.get(0);
-			if (cullCrop(first, harvestProvider)) {
-				pendingCrops.remove(0);
-				return true;
-			} else {
-				return false;
-			}
-		}
-
-		// Cultivation and collection
-		FarmWorkStatus farmWorkStatus = new FarmWorkStatus();
-
-		List<FarmDirection> farmDirections = Arrays.asList(FarmDirection.values());
-		Collections.shuffle(farmDirections, world.rand);
-		for (FarmDirection farmSide : farmDirections) {
-			IFarmLogic logic = getFarmLogic(farmSide);
-			List<FarmTarget> farmTargets = targets.get(farmSide);
-
-			if (stage == Stage.CULTIVATE) {
-				for (FarmTarget target : farmTargets) {
-					if (target.getExtent() > 0) {
-						farmWorkStatus.hasFarmland = true;
-						break;
-					}
-				}
-			}
-
-			if (FarmHelper.isCycleCanceledByListeners(logic, farmSide, farmListeners)) {
-				continue;
-			}
-
-			// Always try to collect windfall.
-			if (collectWindfall(logic)) {
-				farmWorkStatus.didWork = true;
-			}
-
-			if (stage == Stage.HARVEST) {
-				Collection<ICrop> harvested = FarmHelper.harvestTargets(world, this, farmTargets, logic, farmListeners);
-				farmWorkStatus.didWork = !harvested.isEmpty();
-				if (!harvested.isEmpty()) {
-					pendingCrops.addAll(harvested);
-					pendingCrops.sort(FarmHelper.TopDownICropComparator.INSTANCE);
-					harvestProvider = logic;
-				}
-			} else if (stage == Stage.CULTIVATE) {
-				farmWorkStatus = cultivateTargets(farmWorkStatus, farmTargets, logic, farmSide);
-			}
-
-			if (farmWorkStatus.didWork) {
-				break;
-			}
-		}
-
-		if (stage == Stage.CULTIVATE) {
-			errorLogic.setCondition(!farmWorkStatus.hasFarmland, EnumErrorCode.NO_FARMLAND);
-			errorLogic.setCondition(!farmWorkStatus.hasFertilizer, EnumErrorCode.NO_FERTILIZER);
-			errorLogic.setCondition(!farmWorkStatus.hasLiquid, EnumErrorCode.NO_LIQUID_FARM);
-		}
-
-		// alternate between cultivation and harvest.
-		stage = stage.next();
-
-		return farmWorkStatus.didWork;
+		return manager.doWork();
 	}
 
-	private void setUpFarmlandTargets() {
+	@Override
+	public void setUpFarmlandTargets(Map<FarmDirection, List<FarmTarget>> targets) {
 		BlockPos targetStart = getCoords();
 
 		BlockPos max = getMaximumCoord();
@@ -515,127 +375,41 @@ public class FarmController extends RectangularMultiblockControllerBase implemen
 		FarmHelper.setExtents(world, this, targets);
 	}
 
-	private FarmWorkStatus cultivateTargets(FarmWorkStatus farmWorkStatus, List<FarmTarget> farmTargets, IFarmLogic logic, FarmDirection farmSide) {
-		if (farmWorkStatus.hasFarmland) {
-			final float hydrationModifier = hydrationManager.getHydrationModifier();
-			final int fertilizerConsumption = Math.round(logic.getFertilizerConsumption() * Config.fertilizerModifier);
-			final int liquidConsumption = logic.getWaterConsumption(hydrationModifier);
-			final FluidStack liquid = new FluidStack(FluidRegistry.WATER, liquidConsumption);
-
-			for (FarmTarget target : farmTargets) {
-				// Check fertilizer and water
-				if (!fertilizerManager.hasFertilizer(inventory, fertilizerConsumption)) {
-					farmWorkStatus.hasFertilizer = false;
-					continue;
-				}
-
-				if (liquid.amount > 0 && !hasLiquid(liquid)) {
-					farmWorkStatus.hasLiquid = false;
-					continue;
-				}
-
-				if (FarmHelper.cultivateTarget(world, this, target, logic, farmListeners)) {
-					// Remove fertilizer and water
-					fertilizerManager.removeFertilizer(inventory, fertilizerConsumption);
-					removeLiquid(liquid);
-
-					farmWorkStatus.didWork = true;
-				}
-			}
-		}
-
-		return farmWorkStatus;
-	}
-
-	private boolean collectWindfall(IFarmLogic logic) {
-		NonNullList<ItemStack> collected = logic.collect(world, this);
-		if (collected.isEmpty()) {
-			return false;
-		}
-
-		// Let event handlers know.
-		for (IFarmListener listener : farmListeners) {
-			listener.hasCollected(collected, logic);
-		}
-
-		for (ItemStack produce : collected) {
-			inventory.addProduce(produce);
-			pendingProduce.push(produce);
-		}
-
-		return true;
-	}
-
-	private boolean cullCrop(ICrop crop, IFarmLogic provider) {
-
-		// Let event handlers handle the harvest first.
-		for (IFarmListener listener : farmListeners) {
-			if (listener.beforeCropHarvest(crop)) {
-				return true;
-			}
-		}
-
-		final int fertilizerConsumption = Math.round(provider.getFertilizerConsumption() * Config.fertilizerModifier);
-
-		IErrorLogic errorLogic = getErrorLogic();
-
-		// Check fertilizer
-		Boolean hasFertilizer = fertilizerManager.hasFertilizer(inventory, fertilizerConsumption);
-		if (errorLogic.setCondition(!hasFertilizer, EnumErrorCode.NO_FERTILIZER)) {
-			return false;
-		}
-
-		// Check water
-		float hydrationModifier = hydrationManager.getHydrationModifier();
-		int waterConsumption = provider.getWaterConsumption(hydrationModifier);
-		FluidStack requiredLiquid = new FluidStack(FluidRegistry.WATER, waterConsumption);
-		boolean hasLiquid = requiredLiquid.amount == 0 || hasLiquid(requiredLiquid);
-
-		if (errorLogic.setCondition(!hasLiquid, EnumErrorCode.NO_LIQUID_FARM)) {
-			return false;
-		}
-
-		NonNullList<ItemStack> harvested = crop.harvest();
-		if (harvested != null) {
-			// Remove fertilizer and water
-			fertilizerManager.removeFertilizer(inventory, fertilizerConsumption);
-			removeLiquid(requiredLiquid);
-
-			// Let event handlers handle the harvest first.
-			for (IFarmListener listener : farmListeners) {
-				listener.afterCropHarvest(harvested, crop);
-			}
-
-			inventory.stowHarvest(harvested, pendingProduce);
-		}
-		return true;
+	@Override
+	public int getStoredFertilizerScaled(int scale) {
+		return manager.getFertilizerManager().getStoredFertilizerScaled(inventory, scale);
 	}
 
 	@Override
-	public int getStoredFertilizerScaled(int scale) {
-		return fertilizerManager.getStoredFertilizerScaled(inventory, scale);
+	public BlockPos getFarmCorner(FarmDirection direction) {
+		return manager.getFarmCorner(direction);
 	}
 
 	@Override
 	public boolean hasLiquid(FluidStack liquid) {
-		FluidStack drained = resourceTank.drainInternal(liquid, false);
+		FluidStack drained = manager.getResourceTank().drainInternal(liquid, IFluidHandler.FluidAction.SIMULATE);
 		return liquid.isFluidStackIdentical(drained);
 	}
 
 	@Override
 	public void removeLiquid(FluidStack liquid) {
-		resourceTank.drain(liquid.amount, true);
+		manager.getResourceTank().drain(liquid.getAmount(), IFluidHandler.FluidAction.EXECUTE);
 	}
 
 	@Override
-	public boolean plantGermling(IFarmable germling, World world, BlockPos pos) {
-		EntityPlayer player = PlayerUtil.getFakePlayer(world, getOwnerHandler().getOwner());
+	public boolean plantGermling(IFarmable germling, World world, BlockPos pos, FarmDirection direction) {
+		PlayerEntity player = PlayerUtil.getFakePlayer(world, getOwnerHandler().getOwner());
 		return player != null && inventory.plantGermling(germling, player, pos);
 	}
 
 	@Override
-	public IFarmInventory getFarmInventory() {
+	public IFarmInventoryInternal getFarmInventory() {
 		return inventory;
+	}
+
+	@Override
+	public void addPendingProduct(ItemStack stack) {
+		manager.addPendingProduct(stack);
 	}
 
 	@Override
@@ -648,7 +422,7 @@ public class FarmController extends RectangularMultiblockControllerBase implemen
 
 	@Override
 	public void resetFarmLogic(FarmDirection direction) {
-		setFarmLogic(direction, FarmRegistry.getInstance().getProperties(ForestryFarmIdentifier.ARBOREAL).getLogic(false));
+		setFarmLogic(direction, FarmDefinition.ARBOREAL.getProperties().getLogic(false));
 	}
 
 	@Override
@@ -703,7 +477,7 @@ public class FarmController extends RectangularMultiblockControllerBase implemen
 
 	@Override
 	public boolean isValidPlatform(World world, BlockPos pos) {
-		IBlockState blockState = world.getBlockState(pos);
+		BlockState blockState = world.getBlockState(pos);
 		return FarmHelper.bricks.contains(blockState.getBlock());
 	}
 
@@ -714,27 +488,22 @@ public class FarmController extends RectangularMultiblockControllerBase implemen
 
 	@Override
 	public int getExtents(FarmDirection direction, BlockPos pos) {
-		if (!lastExtents.contains(direction, pos)) {
-			lastExtents.put(direction, pos, 0);
-			return 0;
-		}
-
-		return lastExtents.get(direction, pos);
+		return manager.getExtents(direction, pos);
 	}
 
 	@Override
 	public void setExtents(FarmDirection direction, BlockPos pos, int extend) {
-		lastExtents.put(direction, pos, extend);
+		manager.setExtents(direction, pos, extend);
 	}
 
 	@Override
 	public void cleanExtents(FarmDirection direction) {
-		lastExtents.row(direction).clear();
+		manager.cleanExtents(direction);
 	}
 
 	// for debugging
 	@Override
 	public String toString() {
-		return MoreObjects.toStringHelper(this).add("stage", stage).add("logic", farmLogics.toString()).toString();
+		return MoreObjects.toStringHelper(this).add("logic", farmLogics.toString()).toString();
 	}
 }

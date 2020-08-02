@@ -18,13 +18,11 @@ import java.util.Set;
 import java.util.Stack;
 
 import net.minecraft.block.Block;
-import net.minecraft.block.BlockOldLog;
-import net.minecraft.block.BlockPlanks;
-import net.minecraft.block.state.IBlockState;
-import net.minecraft.init.Blocks;
-import net.minecraft.init.Items;
+import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
 import net.minecraft.item.ItemStack;
-import net.minecraft.util.EnumFacing;
+import net.minecraft.tags.BlockTags;
+import net.minecraft.util.Direction;
 import net.minecraft.util.NonNullList;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
@@ -34,9 +32,10 @@ import forestry.api.farming.ICrop;
 import forestry.api.farming.IFarmHousing;
 import forestry.api.farming.IFarmProperties;
 import forestry.api.farming.IFarmable;
-import forestry.api.farming.ISoil;
+import forestry.api.farming.Soil;
 import forestry.core.utils.BlockUtil;
 import forestry.farming.logic.farmables.FarmableCocoa;
+
 
 public class FarmLogicCocoa extends FarmLogicSoil {
 	private static final int[] LAYOUT_POSITIONS = new int[]{4, 1, 3, 0, 2};
@@ -44,36 +43,6 @@ public class FarmLogicCocoa extends FarmLogicSoil {
 
 	public FarmLogicCocoa(IFarmProperties properties, boolean isManual) {
 		super(properties, isManual);
-	}
-
-	@Override
-	public ItemStack getIconItemStack() {
-		return new ItemStack(Items.DYE, 1, 3);
-	}
-
-	@Override
-	public String getUnlocalizedName() {
-		return "for.farm.cocoa";
-	}
-
-	@Override
-	public int getFertilizerConsumption() {
-		return 120;
-	}
-
-	@Override
-	public int getWaterConsumption(float hydrationModifier) {
-		return (int) (20 * hydrationModifier);
-	}
-
-	@Override
-	public boolean isAcceptedGermling(ItemStack itemstack) {
-		return cocoa.isGermling(itemstack);
-	}
-
-	@Override
-	public boolean isAcceptedWindfall(ItemStack stack) {
-		return false;
 	}
 
 	@Override
@@ -94,9 +63,9 @@ public class FarmLogicCocoa extends FarmLogicSoil {
 			return false;
 		}
 		BlockPos cornerPos = farmHousing.getFarmCorner(direction);
-		int distance = getDistanceValue(direction.getFacing().rotateAround(EnumFacing.Axis.Y), cornerPos, pos) - 1;
+		int distance = getDistanceValue(direction.getFacing().rotateY(), cornerPos, pos) - 1;
 		int layoutExtent = LAYOUT_POSITIONS[distance % LAYOUT_POSITIONS.length];
-		for (ISoil soil : getSoils()) {
+		for (Soil soil : getSoils()) {
 			NonNullList<ItemStack> resources = NonNullList.create();
 			resources.add(soil.getResource());
 
@@ -119,7 +88,7 @@ public class FarmLogicCocoa extends FarmLogicSoil {
 				for (int z = 0; z < 3; z++) {
 					BlockPos location = position.up(z);
 
-					IBlockState state = world.getBlockState(location);
+					BlockState state = world.getBlockState(location);
 					if (z == 0 && !world.isAirBlock(location)
 						|| z > 0 && isAcceptedSoil(state)
 						|| !BlockUtil.isBreakableBlock(state, world, pos)) {
@@ -127,8 +96,8 @@ public class FarmLogicCocoa extends FarmLogicSoil {
 					}
 
 					if (!BlockUtil.isReplaceableBlock(state, world, location)) {
-						BlockUtil.getBlockDrops(world, location).forEach(farmHousing::addPendingProduce);
-						world.setBlockToAir(location);
+						BlockUtil.getBlockDrops(world, location).forEach(farmHousing::addPendingProduct);
+						world.setBlockState(location, Blocks.AIR.getDefaultState());
 						return trySetSoil(world, farmHousing, location, soil.getResource(), soil.getSoilState());
 					}
 
@@ -142,7 +111,7 @@ public class FarmLogicCocoa extends FarmLogicSoil {
 		return false;
 	}
 
-	protected int getDistanceValue(EnumFacing facing, BlockPos posA, BlockPos posB) {
+	protected int getDistanceValue(Direction facing, BlockPos posA, BlockPos posB) {
 		BlockPos delta = posA.subtract(posB);
 		int value;
 		switch (facing.getAxis()) {
@@ -167,7 +136,7 @@ public class FarmLogicCocoa extends FarmLogicSoil {
 		return (distance % LAYOUT_POSITIONS.length) == (layoutExtent);
 	}
 
-	protected boolean trySetSoil(World world, IFarmHousing farmHousing, BlockPos position, ItemStack resource, IBlockState ground) {
+	protected boolean trySetSoil(World world, IFarmHousing farmHousing, BlockPos position, ItemStack resource, BlockState ground) {
 		NonNullList<ItemStack> resources = NonNullList.create();
 		resources.add(resource);
 		if (!farmHousing.getFarmInventory().hasResources(resources)) {
@@ -181,7 +150,7 @@ public class FarmLogicCocoa extends FarmLogicSoil {
 	}
 
 	@Override
-	public Collection<ICrop> harvest(World world, IFarmHousing housing, BlockPos pos, FarmDirection direction, int extent) {
+	public Collection<ICrop> harvest(World world, IFarmHousing housing, FarmDirection direction, int extent, BlockPos pos) {
 		BlockPos position = housing.getValidPosition(direction, pos, extent, pos.up());
 		Collection<ICrop> crops = getHarvestBlocks(world, position);
 		housing.increaseExtent(direction, pos, extent);
@@ -190,17 +159,17 @@ public class FarmLogicCocoa extends FarmLogicSoil {
 	}
 
 	private boolean tryPlantingCocoa(World world, IFarmHousing farmHousing, BlockPos position, FarmDirection farmDirection) {
-		BlockPos.MutableBlockPos current = new BlockPos.MutableBlockPos(position);
-		IBlockState blockState = world.getBlockState(current);
+		BlockPos.Mutable current = new BlockPos.Mutable();
+		BlockState blockState = world.getBlockState(current.setPos(position));
 		while (isJungleTreeTrunk(blockState)) {
-			for (EnumFacing direction : EnumFacing.HORIZONTALS) {
+			for (Direction direction : Direction.Plane.HORIZONTAL) {
 				BlockPos candidate = new BlockPos(current.getX() + direction.getXOffset(), current.getY(), current.getZ() + direction.getZOffset());
 				if (world.isBlockLoaded(candidate) && world.isAirBlock(candidate)) {
 					return farmHousing.plantGermling(cocoa, world, candidate, farmDirection);
 				}
 			}
 
-			current.move(EnumFacing.UP);
+			current.move(Direction.UP);
 			if (current.getY() - position.getY() > 1) {
 				break;
 			}
@@ -211,9 +180,10 @@ public class FarmLogicCocoa extends FarmLogicSoil {
 		return false;
 	}
 
-	private static boolean isJungleTreeTrunk(IBlockState blockState) {
+	private static boolean isJungleTreeTrunk(BlockState blockState) {
 		Block block = blockState.getBlock();
-		return block == Blocks.LOG && blockState.getValue(BlockOldLog.VARIANT) == BlockPlanks.EnumType.JUNGLE;
+		//TODO - hopefully this is OK
+		return block == Blocks.JUNGLE_LOG;
 	}
 
 	private Collection<ICrop> getHarvestBlocks(World world, BlockPos position) {
@@ -222,11 +192,11 @@ public class FarmLogicCocoa extends FarmLogicSoil {
 		Stack<ICrop> crops = new Stack<>();
 
 		// Determine what type we want to harvest.
-		IBlockState blockState = world.getBlockState(position);
+		BlockState blockState = world.getBlockState(position);
 		Block block = blockState.getBlock();
 
 		ICrop crop = null;
-		if (!block.isWood(world, position)) {
+		if (!block.isIn(BlockTags.LOGS)) {
 			crop = cocoa.getCropAt(world, position, blockState);
 			if (crop == null) {
 				return crops;
@@ -279,13 +249,13 @@ public class FarmLogicCocoa extends FarmLogicSoil {
 						continue;
 					}
 
-					IBlockState blockState = world.getBlockState(candidate);
+					BlockState blockState = world.getBlockState(candidate);
 					ICrop crop = cocoa.getCropAt(world, candidate, blockState);
 					if (crop != null) {
 						crops.push(crop);
 						candidates.add(candidate);
 						seen.add(candidate);
-					} else if (blockState.getBlock().isWood(world, candidate)) {
+					} else if (blockState.getBlock().isIn(BlockTags.LOGS)) {
 						candidates.add(candidate);
 						seen.add(candidate);
 					}
